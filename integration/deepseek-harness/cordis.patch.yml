@@ -1,0 +1,17 @@
+# Host service: one process-wide physical serial owner and its generated Remote namespace.
+- insert:
+    - id: serial-console
+      name: '@community/dsh-serial-console'
+      config:
+        logDirectory: !!js dshHomePath('serial-logs')
+        ringCapacity: 20000
+
+# Mount the generated Remote contribution before the UI consumes remote.serialConsole.
+    - id: serial-console-remotes
+      name: '@community/dsh-client-serial-remotes'
+
+# Browser roster entry. Its node half exposes the dsh.client metadata and bundle.
+    - id: ui-serial-console
+      name: '@community/dsh-client-ui-serial-console'
+
+# The model-facing @community/dsh-tool-serial belongs in an agent preset, not here.

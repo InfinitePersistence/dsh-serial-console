@@ -1,0 +1,283 @@
+.dsh-serial-console {
+  --serial-bg: #0c1117;
+  --serial-panel: #141b23;
+  --serial-border: #293442;
+  --serial-fg: #d7e0ea;
+
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 320px;
+  height: 100%;
+  color: var(--serial-fg);
+  background: var(--serial-bg);
+  border: 1px solid var(--serial-border);
+  border-radius: 10px;
+  overflow: hidden;
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.dsh-serial-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--serial-panel);
+  border-bottom: 1px solid var(--serial-border);
+  flex-wrap: wrap;
+}
+
+.dsh-serial-toolbar select,
+.dsh-serial-toolbar input,
+.dsh-serial-toolbar button {
+  color: inherit;
+  background: #0d141c;
+  border: 1px solid #344251;
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.dsh-serial-toolbar button { cursor: pointer; }
+
+.dsh-serial-toolbar button:disabled,
+.dsh-serial-toolbar select:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.dsh-serial-baud { width: 90px; }
+
+.dsh-serial-status {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #687482;
+  box-shadow: 0 0 0 3px rgb(104 116 130 / 16%);
+}
+
+.dsh-serial-status.is-connected { background: #48c78e; }
+.dsh-serial-status.is-opening,
+.dsh-serial-status.is-closing { background: #e6b450; }
+.dsh-serial-status.is-error { background: #ef596f; }
+
+.dsh-serial-terminal-stage {
+  --serial-terminal-background: #000000;
+  --serial-terminal-foreground: #d7e0ea;
+  --serial-terminal-cursor: #f4f7fb;
+  --serial-terminal-selection: #284b63;
+  --serial-terminal-scrollbar: #3a4857;
+  --serial-terminal-scrollbar-hover: #56687b;
+
+  position: relative;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 0 8px 4px;
+  background: var(--serial-terminal-background);
+  overflow: hidden;
+}
+
+.dsh-serial-gutter {
+  position: relative;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  border-right: 1px solid var(--serial-border);
+  user-select: none;
+}
+
+.dsh-serial-gutter-row {
+  position: absolute;
+  left: 4px;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  font: 700 10px/1 system-ui, sans-serif;
+  transform: translateY(1px);
+}
+
+.dsh-serial-gutter-row.is-board { color: #7bd88f; background: rgb(123 216 143 / 14%); }
+.dsh-serial-gutter-row.is-user { color: #ffd166; background: rgb(255 209 102 / 14%); }
+.dsh-serial-gutter-row.is-model { color: #70b8ff; background: rgb(112 184 255 / 14%); }
+.dsh-serial-gutter-row.is-system { color: #8997a8; background: rgb(137 151 168 / 14%); }
+
+.dsh-serial-xterm-host {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding-left: 8px;
+  overflow: hidden;
+  font: 13px/normal ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.dsh-serial-terminal-hint {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: 42px;
+  color: #8997a8;
+  pointer-events: none;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+
+.dsh-serial-hex-log {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #000000;
+  color: #d7e0ea;
+}
+
+.dsh-serial-row {
+  display: grid;
+  grid-template-columns: 78px 58px minmax(0, 1fr);
+  gap: 8px;
+  min-height: 19px;
+}
+
+.dsh-serial-row time { color: #718096; }
+.dsh-serial-row.is-rx { color: #d7e0ea; }
+.dsh-serial-row.is-model { color: #70b8ff; }
+.dsh-serial-row.is-user { color: #ffd166; }
+.dsh-serial-row.is-system { color: #8997a8; }
+.dsh-serial-row.is-error { color: #ff6b81; }
+
+.dsh-serial-actor {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #93a4b7;
+}
+
+.dsh-serial-actor.is-board { color: #7bd88f; }
+.dsh-serial-actor.is-model { color: #70b8ff; }
+.dsh-serial-actor.is-user { color: #ffd166; }
+.dsh-serial-actor.is-system { color: #8997a8; }
+
+.dsh-serial-warning,
+.dsh-serial-error {
+  padding: 6px 10px;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+
+.dsh-serial-warning { color: #ffe29a; background: #332b18; }
+.dsh-serial-error { color: #ffd6dc; background: #3a1820; }
+
+/*
+ * Structural xterm rules adapted from @xterm/xterm 6.0.0 css/xterm.css.
+ * Copyright (c) The xterm.js authors, distributed under the MIT license.
+ */
+.dsh-serial-xterm-host .xterm {
+  position: relative;
+  height: 100%;
+  cursor: text;
+  user-select: none;
+}
+
+.dsh-serial-xterm-host .xterm.focus,
+.dsh-serial-xterm-host .xterm:focus { outline: none; }
+
+.dsh-serial-xterm-host .xterm-helpers {
+  position: absolute;
+  top: 0;
+  z-index: 5;
+}
+
+.dsh-serial-xterm-host .xterm-helper-textarea {
+  position: absolute;
+  z-index: -5;
+  top: 0;
+  left: -9999em;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  resize: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.dsh-serial-xterm-host .composition-view {
+  position: absolute;
+  z-index: 1;
+  display: none;
+  color: var(--serial-terminal-foreground);
+  background: var(--serial-terminal-background);
+  white-space: nowrap;
+}
+
+.dsh-serial-xterm-host .composition-view.active { display: block; }
+
+.dsh-serial-xterm-host .xterm-viewport {
+  position: absolute;
+  inset: 0;
+  overflow-y: scroll;
+  cursor: default;
+  background: var(--serial-terminal-background);
+}
+
+.dsh-serial-xterm-host .xterm-screen { position: relative; }
+
+.dsh-serial-xterm-host .xterm-screen canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.dsh-serial-xterm-host .xterm-char-measure-element {
+  position: absolute;
+  top: 0;
+  left: -9999em;
+  display: inline-block;
+  visibility: hidden;
+  line-height: normal;
+}
+
+.dsh-serial-xterm-host .xterm-accessibility:not(.debug),
+.dsh-serial-xterm-host .xterm-message {
+  position: absolute;
+  z-index: 10;
+  inset: 0;
+  color: transparent;
+  pointer-events: none;
+}
+
+.dsh-serial-xterm-host .xterm-accessibility-tree {
+  font-family: monospace;
+  user-select: text;
+  white-space: pre;
+}
+
+.dsh-serial-xterm-host .live-region {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.dsh-serial-xterm-host .xterm-decoration-container .xterm-decoration {
+  position: absolute;
+  z-index: 6;
+}
+
+.dsh-serial-xterm-host .xterm-decoration-overview-ruler {
+  position: absolute;
+  z-index: 8;
+  top: 0;
+  right: 0;
+  pointer-events: none;
+}
