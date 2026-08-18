@@ -64,7 +64,9 @@
   --serial-terminal-background: #000000;
   --serial-terminal-foreground: #d7e0ea;
   --serial-terminal-cursor: #f4f7fb;
-  --serial-terminal-selection: #284b63;
+  --serial-terminal-selection-background: #d7e0ea;
+  --serial-terminal-selection-foreground: #000000;
+  --serial-terminal-selection-inactive: #93a4b7;
   --serial-terminal-scrollbar: #3a4857;
   --serial-terminal-scrollbar-hover: #56687b;
 
@@ -272,6 +274,15 @@
 .dsh-serial-xterm-host .xterm-decoration-container .xterm-decoration {
   position: absolute;
   z-index: 6;
+}
+
+.dsh-serial-xterm-host .xterm-decoration-container .xterm-decoration.xterm-decoration-top-layer {
+  z-index: 7;
+}
+
+.dsh-serial-xterm-host .xterm-decoration-top {
+  position: relative;
+  z-index: 2;
 }
 
 .dsh-serial-xterm-host .xterm-decoration-overview-ruler {

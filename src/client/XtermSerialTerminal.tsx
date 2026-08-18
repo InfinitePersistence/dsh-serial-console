@@ -511,7 +511,9 @@ function terminalTheme(styles: CSSStyleDeclaration): ITheme {
     foreground: requiredVariable(styles, '--serial-terminal-foreground'),
     cursor: requiredVariable(styles, '--serial-terminal-cursor'),
     cursorAccent: requiredVariable(styles, '--serial-terminal-background'),
-    selectionBackground: requiredVariable(styles, '--serial-terminal-selection'),
+    selectionBackground: requiredVariable(styles, '--serial-terminal-selection-background'),
+    selectionForeground: requiredVariable(styles, '--serial-terminal-selection-foreground'),
+    selectionInactiveBackground: requiredVariable(styles, '--serial-terminal-selection-inactive'),
     scrollbarSliderBackground: requiredVariable(styles, '--serial-terminal-scrollbar'),
     scrollbarSliderHoverBackground: requiredVariable(styles, '--serial-terminal-scrollbar-hover'),
   }
