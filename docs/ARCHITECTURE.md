@@ -40,7 +40,7 @@ Host 是唯一物理串口所有者。模型工具调用同进程 service；Web 
 
 `XtermSerialTerminal` 是 Text 模式唯一的屏幕与输入面。RX 的 Base64 原始字节作为 `Uint8Array` 写入 xterm；TX 不写入屏幕，避免板端回显与浏览器本地回显重复。Tab、Backspace、方向键、粘贴、IME 和控制序列按 xterm 产生的字节发送，补全和光标位置由板端 readline 与 VT 回显决定。
 
-来源 gutter 位于终端字节流之外。实时用户输入在发送前标记 `U`，模型 TX 与历史回放通过 TX 文本和附近 buffer 行关联为 `M`，普通 RX 标记 `B`，state/marker/error 标记 `S`。事件 actor 和原始 JSONL 始终是审计权威，gutter 的历史行关联属于展示信息。
+来源 gutter 位于终端字节流之外。活动的最底部逻辑行始终隐藏标签；RX 形成的历史行默认标记 `B`，state/marker/error 标记 `S`。TX 侧只跟踪是否提交了可见命令，空回车不建立用户归属。提交后仅在 xterm 已完成且尚未归属的行中按完整行文本或命令尾部精确匹配；每个完成行最多消费一个待匹配提交，避免快速重复命令错位。匹配成功才把 `B` 升级为 `U` 或 `M`，无法证明来源时保持 `B`。物理 Enter 由 xterm `onData` 的单一路径映射为所选 CR/LF/CRLF，避免按键处理器与数据事件重复发送。事件 actor 和原始 JSONL 始终是审计权威，gutter 的历史行关联属于展示信息。
 
 ## 事件语义
 

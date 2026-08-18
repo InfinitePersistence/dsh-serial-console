@@ -1,0 +1,109 @@
+/** Minimal TX-side state used only to recognise visible command submissions. */
+export interface TerminalTransmitState {
+  readonly draft: string
+  readonly opaque: boolean
+}
+
+export interface TerminalSubmission {
+  readonly command: string | undefined
+  readonly opaque: boolean
+}
+
+export interface TerminalTransmitUpdate {
+  readonly state: TerminalTransmitState
+  readonly submissions: readonly TerminalSubmission[]
+}
+
+export interface TerminalSubmissionTarget {
+  readonly command: string | undefined
+  readonly lineText: string | undefined
+  readonly minLine: number
+}
+
+export interface TerminalCompletedRow {
+  readonly line: number
+  readonly text: string
+  readonly claimed: boolean
+}
+
+export type TerminalLineEnding = 'cr' | 'lf' | 'crlf' | 'none'
+
+/** Map xterm's single physical-Enter token through the selected line ending. */
+export function mapTerminalInput(data: string, lineEnding: TerminalLineEnding): string {
+  if (data !== '\r') return data
+  if (lineEnding === 'cr') return '\r'
+  if (lineEnding === 'lf') return '\n'
+  if (lineEnding === 'crlf') return '\r\n'
+  return ''
+}
+
+/** Choose one unclaimed completed row for one submitted TX command. */
+export function findTerminalSubmissionMatch(
+  target: TerminalSubmissionTarget,
+  rowsNewestFirst: readonly TerminalCompletedRow[],
+): number | undefined {
+  for (const row of rowsNewestFirst) {
+    if (row.line < target.minLine || row.claimed || row.text.length === 0) continue
+    if (target.lineText !== undefined && row.text === target.lineText) return row.line
+    if (target.command !== undefined && row.text.endsWith(target.command)) return row.line
+  }
+  return undefined
+}
+
+/**
+ * Track printable TX text without attempting to emulate the remote readline.
+ * Empty Enter produces no submission; history/Tab makes the draft opaque so a
+ * completed xterm row, rather than guessed browser text, is used for matching.
+ */
+export function advanceTerminalTransmit(
+  state: TerminalTransmitState,
+  text: string,
+): TerminalTransmitUpdate {
+  let { draft, opaque } = state
+  const submissions: TerminalSubmission[] = []
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!
+    if (character === '\u001b') {
+      const escapeEnd = skipEscape(text, index)
+      const final = text[escapeEnd]
+      if (draft.length !== 0 || opaque || final === 'A' || final === 'B') opaque = true
+      index = escapeEnd
+      continue
+    }
+    if (character === '\u007f' || character === '\b') {
+      draft = removeLastCodePoint(draft)
+      continue
+    }
+    if (character === '\u0003') {
+      draft = ''
+      opaque = false
+      continue
+    }
+    if (character === '\r' || (character === '\n' && text[index - 1] !== '\r')) {
+      if (draft.length !== 0 || opaque) submissions.push({ command: draft || undefined, opaque })
+      draft = ''
+      opaque = false
+      continue
+    }
+    if (character === '\t') {
+      if (draft.length !== 0 || opaque) opaque = true
+      continue
+    }
+    if (character < ' ') continue
+    draft += character
+  }
+  return { state: { draft, opaque }, submissions }
+}
+
+function removeLastCodePoint(value: string): string {
+  const points = [...value]
+  points.pop()
+  return points.join('')
+}
+
+function skipEscape(value: string, escapeIndex: number): number {
+  if (value[escapeIndex + 1] !== '[') return escapeIndex
+  let index = escapeIndex + 2
+  while (index < value.length && !/[@-~]/.test(value[index]!)) index += 1
+  return index
+}

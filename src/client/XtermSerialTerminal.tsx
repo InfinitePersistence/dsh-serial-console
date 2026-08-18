@@ -4,10 +4,14 @@ import type { IMarker, ITheme } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import type { SerialActor, SerialEvent } from '../protocol.js'
 import type { SerialLineEnding } from './serial-console-store.js'
+import {
+  advanceTerminalTransmit,
+  findTerminalSubmissionMatch,
+  mapTerminalInput,
+} from './terminal-transmit.js'
+import type { TerminalSubmission } from './terminal-transmit.js'
 
 type GutterActor = SerialActor | 'board' | 'system'
-
-const RX_BEFORE_TX_CORRELATION_MS = 500
 
 interface GutterRecord {
   readonly marker: IMarker
@@ -22,10 +26,16 @@ interface GutterRow {
 
 interface ReceiveSpan {
   readonly eventSeq: number
-  readonly monotonicMs: number
   readonly startLine: number
   readonly endLine: number
-  readonly crossedHardLine: boolean
+}
+
+interface PendingSubmission {
+  readonly actor: SerialActor
+  readonly command: string | undefined
+  readonly lineText: string | undefined
+  readonly minLine: number
+  readonly txSeq: number
 }
 
 interface TerminalRuntime {
@@ -33,8 +43,8 @@ interface TerminalRuntime {
   readonly records: GutterRecord[]
   readonly queue: SerialEvent[]
   readonly txDrafts: Record<SerialActor, string>
-  activeActor: SerialActor | undefined
-  submitPending: boolean
+  readonly txOpaque: Record<SerialActor, boolean>
+  readonly pendingSubmissions: PendingSubmission[]
   draining: boolean
   disposed: boolean
   lastQueuedSeq: number
@@ -105,8 +115,8 @@ export function XtermSerialTerminal({
       records: [],
       queue: [],
       txDrafts: { model: '', user: '' },
-      activeActor: undefined,
-      submitPending: false,
+      txOpaque: { model: false, user: false },
+      pendingSubmissions: [],
       draining: false,
       disposed: false,
       lastQueuedSeq: 0,
@@ -118,27 +128,13 @@ export function XtermSerialTerminal({
     const refresh = () => { refreshGutter(runtime, setGutterRows) }
     const dataDisposable = terminal.onData(data => {
       if (!connectedRef.current || data.length === 0) return
-      runtime.activeActor = 'user'
-      if (data.includes('\u0003')) runtime.submitPending = true
-      markLine(runtime, currentLine(terminal), 'user', refresh)
-      void textInputRef.current(data).catch(() => undefined)
+      const outgoing = mapTerminalInput(data, lineEndingRef.current)
+      if (outgoing.length === 0) return
+      void textInputRef.current(outgoing).catch(() => undefined)
     })
     const binaryDisposable = terminal.onBinary(data => {
       if (!connectedRef.current || data.length === 0) return
-      runtime.activeActor = 'user'
-      markLine(runtime, currentLine(terminal), 'user', refresh)
       void binaryInputRef.current(globalThis.btoa(data)).catch(() => undefined)
-    })
-    terminal.attachCustomKeyEventHandler(event => {
-      if (event.type !== 'keydown' || event.key !== 'Enter' || event.isComposing) return true
-      if (!connectedRef.current) return false
-      const bytes = lineEndingText(lineEndingRef.current)
-      if (bytes.length === 0) return false
-      runtime.activeActor = 'user'
-      runtime.submitPending = true
-      markLine(runtime, currentLine(terminal), 'user', refresh)
-      void textInputRef.current(bytes).catch(() => undefined)
-      return false
     })
     const renderDisposable = terminal.onRender(refresh)
     const scrollDisposable = terminal.onScroll(refresh)
@@ -175,6 +171,14 @@ export function XtermSerialTerminal({
     runtime.terminal.options.disableStdin = !connected
     runtime.terminal.options.cursorBlink = connected
     if (connected) runtime.terminal.focus()
+    else {
+      runtime.receiveTail.splice(0)
+      runtime.pendingSubmissions.splice(0)
+      runtime.txDrafts.user = ''
+      runtime.txDrafts.model = ''
+      runtime.txOpaque.user = false
+      runtime.txOpaque.model = false
+    }
   }, [connected])
 
   useEffect(() => {
@@ -223,9 +227,7 @@ function drainEvents(
     runtime.terminal.write(decodeBase64(event.dataBase64), () => {
       if (!runtime.disposed) {
         const span = describeReceiveSpan(
-          runtime.terminal,
           event.seq,
-          event.monotonicMs,
           startLine,
           currentLine(runtime.terminal),
         )
@@ -257,52 +259,18 @@ function markReceiveSpan(
   span: ReceiveSpan,
   refresh: () => void,
 ): void {
-  const actor = runtime.activeActor
-  applyReceiveAttribution(runtime, span, actor, runtime.submitPending, refresh, false)
-  if (actor !== undefined && runtime.submitPending && span.crossedHardLine) {
-    runtime.activeActor = undefined
-    runtime.submitPending = false
+  for (let line = span.startLine; line <= span.endLine; line += 1) {
+    markBoardLine(runtime, line, refresh, false)
   }
+  resolvePendingSubmissions(runtime, refresh)
 }
 
 function describeReceiveSpan(
-  terminal: Terminal,
   eventSeq: number,
-  monotonicMs: number,
   startLine: number,
   endLine: number,
 ): ReceiveSpan {
-  let crossedHardLine = false
-  for (let line = startLine + 1; line <= endLine; line += 1) {
-    if (terminal.buffer.active.getLine(line)?.isWrapped !== true) crossedHardLine = true
-  }
-  return { eventSeq, monotonicMs, startLine, endLine, crossedHardLine }
-}
-
-function applyReceiveAttribution(
-  runtime: TerminalRuntime,
-  span: ReceiveSpan,
-  actor: SerialActor | undefined,
-  submitted: boolean,
-  refresh: () => void,
-  force: boolean,
-): void {
-  if (actor === undefined) {
-    for (let line = span.startLine; line <= span.endLine; line += 1) {
-      markBoardLine(runtime, line, refresh, force)
-    }
-    return
-  }
-
-  markLine(runtime, span.startLine, actor, refresh, force)
-  let crossedHardLine = false
-  for (let line = span.startLine + 1; line <= span.endLine; line += 1) {
-    const wrapped = runtime.terminal.buffer.active.getLine(line)?.isWrapped === true
-    if (!wrapped) crossedHardLine = true
-    const keepInputOwner = !crossedHardLine || (!submitted && line === span.endLine)
-    if (keepInputOwner) markLine(runtime, line, actor, refresh, force)
-    else markBoardLine(runtime, line, refresh, force)
-  }
+  return { eventSeq, startLine, endLine }
 }
 
 function observeTransmit(
@@ -311,82 +279,52 @@ function observeTransmit(
   refresh: () => void,
 ): void {
   const text = event.text ?? decodeBase64Text(event.dataBase64)
-  const precedingReceive = combineReceiveTail(runtime.terminal, runtime.receiveTail)
+  const precedingReceive = combineReceiveTail(runtime.receiveTail)
   runtime.receiveTail.splice(0)
-  let draft = runtime.txDrafts[event.actor]
-  let submitted = false
-  let sawEscapeSequence = false
-  let submittedCommand: string | undefined
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index]!
-    if (character === '\u001b') {
-      sawEscapeSequence = true
-      index = skipEscape(text, index)
-      continue
-    }
-    if (character === '\u007f' || character === '\b') {
-      draft = removeLastCodePoint(draft)
-      continue
-    }
-    if (character === '\r' || character === '\n') {
-      if (draft.length !== 0) submittedCommand = draft
-      draft = ''
-      submitted = true
-      continue
-    }
-    if (character === '\t' || character < ' ') continue
-    draft += character
-  }
-  runtime.txDrafts[event.actor] = draft
-  // A fast device can reply before write+drain resolves and the Host publishes
-  // its TX event. Re-attribute only the immediately preceding RX in that case.
+  const submissions = observeTransmitText(runtime, event.actor, text)
+  if (submissions.length === 0) return
   const receivedBeforeTransmit = precedingReceive !== undefined
     && precedingReceive.eventSeq + 1 === event.seq
-    && event.monotonicMs >= precedingReceive.monotonicMs
-    && event.monotonicMs - precedingReceive.monotonicMs <= RX_BEFORE_TX_CORRELATION_MS
-  if (receivedBeforeTransmit && (submitted || sawEscapeSequence)) {
-    applyReceiveAttribution(
-      runtime,
-      precedingReceive,
-      event.actor,
-      submitted,
-      refresh,
-      true,
-    )
-    if (submitted && precedingReceive.crossedHardLine && draft.length === 0) {
-      runtime.activeActor = undefined
-      runtime.submitPending = false
-      return
-    }
+  for (const submission of submissions) {
+    const correlated = receivedBeforeTransmit && precedingReceive !== undefined
+      ? markCorrelatedSubmission(runtime, precedingReceive, submission, event.actor, refresh)
+      : false
+    if (correlated) continue
+    const lineText = activeLineText(runtime.terminal)
+    runtime.pendingSubmissions.push({
+      actor: event.actor,
+      command: submission.command,
+      lineText: submission.opaque
+        || (submission.command !== undefined && lineText?.endsWith(submission.command) === true)
+        ? lineText
+        : undefined,
+      minLine: activeLogicalLineStart(runtime.terminal),
+      txSeq: event.seq,
+    })
   }
-  if (submitted) {
-    const alreadyVisible = submittedCommand === undefined
-      ? false
-      : markRecentCommand(runtime, submittedCommand, event.actor, refresh)
-    if (!alreadyVisible) {
-      runtime.activeActor = event.actor
-      runtime.submitPending = true
-      markLine(runtime, currentLine(runtime.terminal), event.actor, refresh)
-    }
-    if (draft.length !== 0) {
-      runtime.activeActor = event.actor
-      runtime.submitPending = false
-      markLine(runtime, currentLine(runtime.terminal), event.actor, refresh)
-    }
-  } else {
-    runtime.activeActor = event.actor
-    markLine(runtime, currentLine(runtime.terminal), event.actor, refresh)
-  }
+  if (runtime.pendingSubmissions.length > 128) runtime.pendingSubmissions.splice(0, 64)
 }
 
-function combineReceiveTail(terminal: Terminal, spans: readonly ReceiveSpan[]): ReceiveSpan | undefined {
+function observeTransmitText(
+  runtime: TerminalRuntime,
+  actor: SerialActor,
+  text: string,
+): readonly TerminalSubmission[] {
+  const update = advanceTerminalTransmit({
+    draft: runtime.txDrafts[actor],
+    opaque: runtime.txOpaque[actor],
+  }, text)
+  runtime.txDrafts[actor] = update.state.draft
+  runtime.txOpaque[actor] = update.state.opaque
+  return update.submissions
+}
+
+function combineReceiveTail(spans: readonly ReceiveSpan[]): ReceiveSpan | undefined {
   const first = spans[0]
   const last = spans.at(-1)
   if (first === undefined || last === undefined) return undefined
   return describeReceiveSpan(
-    terminal,
     last.eventSeq,
-    last.monotonicMs,
     first.startLine,
     last.endLine,
   )
@@ -414,22 +352,72 @@ function clearLineMarkers(runtime: TerminalRuntime, line: number, refresh: () =>
   refresh()
 }
 
-function markRecentCommand(
+function markCorrelatedSubmission(
   runtime: TerminalRuntime,
-  command: string,
+  span: ReceiveSpan,
+  submission: TerminalSubmission,
   actor: SerialActor,
   refresh: () => void,
 ): boolean {
-  const buffer = runtime.terminal.buffer.active
-  const end = currentLine(runtime.terminal)
-  const start = Math.max(0, end - Math.min(runtime.terminal.rows, 12))
-  for (let line = end; line >= start; line -= 1) {
-    const text = buffer.getLine(line)?.translateToString(true) ?? ''
-    if (!text.includes(command)) continue
+  const activeStart = activeLogicalLineStart(runtime.terminal)
+  for (let line = Math.min(span.endLine, activeStart - 1); line >= span.startLine; line -= 1) {
+    if (hasCommandAttribution(runtime, line)) continue
+    const text = runtime.terminal.buffer.active.getLine(line)?.translateToString(true).trimEnd() ?? ''
+    if (text.length === 0) continue
+    if (!submission.opaque
+      && submission.command !== undefined
+      && !text.endsWith(submission.command)) continue
     markLine(runtime, line, actor, refresh, true)
     return true
   }
   return false
+}
+
+function resolvePendingSubmissions(runtime: TerminalRuntime, refresh: () => void): void {
+  const claimed = new Set<number>()
+  for (let index = 0; index < runtime.pendingSubmissions.length;) {
+    const pending = runtime.pendingSubmissions[index]!
+    const line = findPendingSubmissionLine(runtime, pending, claimed)
+    if (line === undefined) {
+      if (runtime.lastQueuedSeq - pending.txSeq > 512) runtime.pendingSubmissions.splice(index, 1)
+      else index += 1
+      continue
+    }
+    markLine(runtime, line, pending.actor, refresh, true)
+    claimed.add(line)
+    runtime.pendingSubmissions.splice(index, 1)
+  }
+}
+
+function findPendingSubmissionLine(
+  runtime: TerminalRuntime,
+  pending: PendingSubmission,
+  claimed: ReadonlySet<number>,
+): number | undefined {
+  const { terminal } = runtime
+  const end = activeLogicalLineStart(terminal) - 1
+  const start = Math.max(pending.minLine, end - Math.min(terminal.rows * 2, 64))
+  const rows = []
+  for (let line = end; line >= start; line -= 1) {
+    const text = terminal.buffer.active.getLine(line)?.translateToString(true).trimEnd() ?? ''
+    rows.push({
+      line,
+      text,
+      claimed: claimed.has(line) || hasCommandAttribution(runtime, line),
+    })
+  }
+  return findTerminalSubmissionMatch(pending, rows)
+}
+
+function hasCommandAttribution(runtime: TerminalRuntime, line: number): boolean {
+  return runtime.records.some(record => !record.marker.isDisposed
+    && record.marker.line === line
+    && (record.actor === 'user' || record.actor === 'model'))
+}
+
+function activeLineText(terminal: Terminal): string | undefined {
+  const text = terminal.buffer.active.getLine(currentLine(terminal))?.translateToString(true).trimEnd() ?? ''
+  return text === '' ? undefined : text
 }
 
 function markLine(
@@ -472,9 +460,12 @@ function refreshGutter(
     ? 0
     : screenRect.top - hostRect.top
   const actors = new Map<number, GutterRecord>()
+  const activeStart = activeLogicalLineStart(runtime.terminal)
+  const activeEnd = currentLine(runtime.terminal)
   for (const record of runtime.records) {
     if (record.marker.isDisposed || record.marker.line < buffer.viewportY) continue
     if (record.marker.line >= buffer.viewportY + runtime.terminal.rows) continue
+    if (record.marker.line >= activeStart && record.marker.line <= activeEnd) continue
     const existing = actors.get(record.marker.line)
     if (existing === undefined || actorPriority(record.actor) >= actorPriority(existing.actor)) {
       actors.set(record.marker.line, record)
@@ -497,6 +488,12 @@ function currentLine(terminal: Terminal): number {
   return terminal.buffer.active.baseY + terminal.buffer.active.cursorY
 }
 
+function activeLogicalLineStart(terminal: Terminal): number {
+  let line = currentLine(terminal)
+  while (line > 0 && terminal.buffer.active.getLine(line)?.isWrapped === true) line -= 1
+  return line
+}
+
 function terminalTheme(styles: CSSStyleDeclaration): ITheme {
   return {
     background: requiredVariable(styles, '--serial-terminal-background'),
@@ -515,13 +512,6 @@ function requiredVariable(styles: CSSStyleDeclaration, name: string): string {
   return value
 }
 
-function lineEndingText(lineEnding: SerialLineEnding): string {
-  if (lineEnding === 'cr') return '\r'
-  if (lineEnding === 'lf') return '\n'
-  if (lineEnding === 'crlf') return '\r\n'
-  return ''
-}
-
 function decodeBase64(value: string): Uint8Array {
   const binary = globalThis.atob(value)
   const bytes = new Uint8Array(binary.length)
@@ -531,19 +521,6 @@ function decodeBase64(value: string): Uint8Array {
 
 function decodeBase64Text(value: string): string {
   return new TextDecoder().decode(decodeBase64(value))
-}
-
-function removeLastCodePoint(value: string): string {
-  const points = [...value]
-  points.pop()
-  return points.join('')
-}
-
-function skipEscape(value: string, escapeIndex: number): number {
-  if (value[escapeIndex + 1] !== '[') return escapeIndex
-  let index = escapeIndex + 2
-  while (index < value.length && !/[@-~]/.test(value[index]!)) index += 1
-  return index
 }
 
 function actorPriority(actor: GutterActor): number {
