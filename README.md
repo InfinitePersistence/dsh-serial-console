@@ -1,6 +1,6 @@
 # DSH Serial Console
 
-让用户与 AI 模型共享同一个可审计的嵌入式串口会话。(D指导,我不想再复制粘贴了,你直接干活吧)
+用户与 AI 模型共享同一个可审计的嵌入式串口会话。(D指导,我不想再复制粘贴了,你直接干活吧)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
