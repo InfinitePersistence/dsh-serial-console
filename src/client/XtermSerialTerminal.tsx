@@ -7,6 +7,8 @@ import type { SerialLineEnding } from './serial-console-store.js'
 
 type GutterActor = SerialActor | 'board' | 'system'
 
+const RX_BEFORE_TX_CORRELATION_MS = 500
+
 interface GutterRecord {
   readonly marker: IMarker
   actor: GutterActor
@@ -16,6 +18,14 @@ interface GutterRow {
   readonly id: number
   readonly actor: GutterActor
   readonly top: number
+}
+
+interface ReceiveSpan {
+  readonly eventSeq: number
+  readonly monotonicMs: number
+  readonly startLine: number
+  readonly endLine: number
+  readonly crossedHardLine: boolean
 }
 
 interface TerminalRuntime {
@@ -28,6 +38,7 @@ interface TerminalRuntime {
   draining: boolean
   disposed: boolean
   lastQueuedSeq: number
+  readonly receiveTail: ReceiveSpan[]
   gutterSignature: string
 }
 
@@ -99,6 +110,7 @@ export function XtermSerialTerminal({
       draining: false,
       disposed: false,
       lastQueuedSeq: 0,
+      receiveTail: [],
       gutterSignature: '',
     }
     runtimeRef.current = runtime
@@ -210,7 +222,20 @@ function drainEvents(
     const startLine = currentLine(runtime.terminal)
     runtime.terminal.write(decodeBase64(event.dataBase64), () => {
       if (!runtime.disposed) {
-        markReceiveSpan(runtime, startLine, currentLine(runtime.terminal), refresh)
+        const span = describeReceiveSpan(
+          runtime.terminal,
+          event.seq,
+          event.monotonicMs,
+          startLine,
+          currentLine(runtime.terminal),
+        )
+        markReceiveSpan(runtime, span, refresh)
+        const previous = runtime.receiveTail.at(-1)
+        if (previous !== undefined && previous.eventSeq + 1 !== span.eventSeq) {
+          runtime.receiveTail.splice(0)
+        }
+        runtime.receiveTail.push(span)
+        if (runtime.receiveTail.length > 16) runtime.receiveTail.shift()
         if (followRef.current) runtime.terminal.scrollToBottom()
       }
       runtime.draining = false
@@ -219,36 +244,64 @@ function drainEvents(
     return
   }
   if (event.type === 'tx') observeTransmit(runtime, event, refresh)
-  else markLine(runtime, currentLine(runtime.terminal), 'system', refresh)
+  else {
+    runtime.receiveTail.splice(0)
+    markLine(runtime, currentLine(runtime.terminal), 'system', refresh)
+  }
   runtime.draining = false
   drainEvents(runtime, followRef, setRows)
 }
 
 function markReceiveSpan(
   runtime: TerminalRuntime,
-  startLine: number,
-  endLine: number,
+  span: ReceiveSpan,
   refresh: () => void,
 ): void {
   const actor = runtime.activeActor
+  applyReceiveAttribution(runtime, span, actor, runtime.submitPending, refresh, false)
+  if (actor !== undefined && runtime.submitPending && span.crossedHardLine) {
+    runtime.activeActor = undefined
+    runtime.submitPending = false
+  }
+}
+
+function describeReceiveSpan(
+  terminal: Terminal,
+  eventSeq: number,
+  monotonicMs: number,
+  startLine: number,
+  endLine: number,
+): ReceiveSpan {
+  let crossedHardLine = false
+  for (let line = startLine + 1; line <= endLine; line += 1) {
+    if (terminal.buffer.active.getLine(line)?.isWrapped !== true) crossedHardLine = true
+  }
+  return { eventSeq, monotonicMs, startLine, endLine, crossedHardLine }
+}
+
+function applyReceiveAttribution(
+  runtime: TerminalRuntime,
+  span: ReceiveSpan,
+  actor: SerialActor | undefined,
+  submitted: boolean,
+  refresh: () => void,
+  force: boolean,
+): void {
   if (actor === undefined) {
-    for (let line = startLine; line <= endLine; line += 1) {
-      markLine(runtime, line, 'board', refresh)
+    for (let line = span.startLine; line <= span.endLine; line += 1) {
+      markBoardLine(runtime, line, refresh, force)
     }
     return
   }
 
-  markLine(runtime, startLine, actor, refresh)
+  markLine(runtime, span.startLine, actor, refresh, force)
   let crossedHardLine = false
-  for (let line = startLine + 1; line <= endLine; line += 1) {
+  for (let line = span.startLine + 1; line <= span.endLine; line += 1) {
     const wrapped = runtime.terminal.buffer.active.getLine(line)?.isWrapped === true
     if (!wrapped) crossedHardLine = true
-    const keepInputOwner = !runtime.submitPending && line === endLine
-    markLine(runtime, line, keepInputOwner ? actor : 'board', refresh)
-  }
-  if (runtime.submitPending && crossedHardLine) {
-    runtime.activeActor = undefined
-    runtime.submitPending = false
+    const keepInputOwner = !crossedHardLine || (!submitted && line === span.endLine)
+    if (keepInputOwner) markLine(runtime, line, actor, refresh, force)
+    else markBoardLine(runtime, line, refresh, force)
   }
 }
 
@@ -258,12 +311,16 @@ function observeTransmit(
   refresh: () => void,
 ): void {
   const text = event.text ?? decodeBase64Text(event.dataBase64)
+  const precedingReceive = combineReceiveTail(runtime.terminal, runtime.receiveTail)
+  runtime.receiveTail.splice(0)
   let draft = runtime.txDrafts[event.actor]
   let submitted = false
+  let sawEscapeSequence = false
   let submittedCommand: string | undefined
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index]!
     if (character === '\u001b') {
+      sawEscapeSequence = true
       index = skipEscape(text, index)
       continue
     }
@@ -281,6 +338,27 @@ function observeTransmit(
     draft += character
   }
   runtime.txDrafts[event.actor] = draft
+  // A fast device can reply before write+drain resolves and the Host publishes
+  // its TX event. Re-attribute only the immediately preceding RX in that case.
+  const receivedBeforeTransmit = precedingReceive !== undefined
+    && precedingReceive.eventSeq + 1 === event.seq
+    && event.monotonicMs >= precedingReceive.monotonicMs
+    && event.monotonicMs - precedingReceive.monotonicMs <= RX_BEFORE_TX_CORRELATION_MS
+  if (receivedBeforeTransmit && (submitted || sawEscapeSequence)) {
+    applyReceiveAttribution(
+      runtime,
+      precedingReceive,
+      event.actor,
+      submitted,
+      refresh,
+      true,
+    )
+    if (submitted && precedingReceive.crossedHardLine && draft.length === 0) {
+      runtime.activeActor = undefined
+      runtime.submitPending = false
+      return
+    }
+  }
   if (submitted) {
     const alreadyVisible = submittedCommand === undefined
       ? false
@@ -299,6 +377,41 @@ function observeTransmit(
     runtime.activeActor = event.actor
     markLine(runtime, currentLine(runtime.terminal), event.actor, refresh)
   }
+}
+
+function combineReceiveTail(terminal: Terminal, spans: readonly ReceiveSpan[]): ReceiveSpan | undefined {
+  const first = spans[0]
+  const last = spans.at(-1)
+  if (first === undefined || last === undefined) return undefined
+  return describeReceiveSpan(
+    terminal,
+    last.eventSeq,
+    last.monotonicMs,
+    first.startLine,
+    last.endLine,
+  )
+}
+
+function markBoardLine(
+  runtime: TerminalRuntime,
+  line: number,
+  refresh: () => void,
+  force: boolean,
+): void {
+  const text = runtime.terminal.buffer.active.getLine(line)?.translateToString(true) ?? ''
+  if (text.length !== 0) {
+    markLine(runtime, line, 'board', refresh, force)
+    return
+  }
+  if (force) clearLineMarkers(runtime, line, refresh)
+}
+
+function clearLineMarkers(runtime: TerminalRuntime, line: number, refresh: () => void): void {
+  for (const record of [...runtime.records]) {
+    if (!record.marker.isDisposed && record.marker.line === line) record.marker.dispose()
+  }
+  runtime.records.splice(0, runtime.records.length, ...runtime.records.filter(record => !record.marker.isDisposed))
+  refresh()
 }
 
 function markRecentCommand(
