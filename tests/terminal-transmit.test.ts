@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   advanceTerminalTransmit,
   findTerminalSubmissionMatch,
+  isReplayingTerminalEvent,
+  isTerminalGeneratedReply,
   mapTerminalInput,
 } from '../src/client/terminal-transmit.js'
 
@@ -20,6 +22,17 @@ describe('terminal TX submission tracking', () => {
     expect(mapTerminalInput('\r', 'lf')).toBe('\n')
     expect(mapTerminalInput('\r', 'none')).toBe('')
     expect(mapTerminalInput('paste\rdata', 'lf')).toBe('paste\rdata')
+  })
+
+  it('suppresses terminal-generated replies only while historical RX is replayed', () => {
+    expect(isReplayingTerminalEvent(20, 19)).toBe(true)
+    expect(isReplayingTerminalEvent(20, 20)).toBe(true)
+    expect(isReplayingTerminalEvent(20, 21)).toBe(false)
+    expect(isReplayingTerminalEvent(20, undefined)).toBe(false)
+    expect(isTerminalGeneratedReply('\u001b[2;21R')).toBe(true)
+    expect(isTerminalGeneratedReply('\u001b[?1;2c')).toBe(true)
+    expect(isTerminalGeneratedReply('\u001b[A')).toBe(false)
+    expect(isTerminalGeneratedReply('echo 1')).toBe(false)
   })
 
   it('recognises a printable command only when it is submitted', () => {

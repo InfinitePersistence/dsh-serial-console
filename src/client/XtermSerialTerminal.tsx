@@ -7,6 +7,8 @@ import type { SerialLineEnding } from './serial-console-store.js'
 import {
   advanceTerminalTransmit,
   findTerminalSubmissionMatch,
+  isReplayingTerminalEvent,
+  isTerminalGeneratedReply,
   mapTerminalInput,
 } from './terminal-transmit.js'
 import type { TerminalSubmission } from './terminal-transmit.js'
@@ -49,6 +51,8 @@ interface TerminalRuntime {
   disposed: boolean
   lastQueuedSeq: number
   readonly receiveTail: ReceiveSpan[]
+  readonly replayThroughSeq: number
+  processingRxSeq: number | undefined
   gutterSignature: string
 }
 
@@ -83,6 +87,7 @@ export function XtermSerialTerminal({
   const lineEndingRef = useRef(lineEnding)
   const textInputRef = useRef(onTextInput)
   const binaryInputRef = useRef(onBinaryInput)
+  const replayThroughSeqRef = useRef(events.at(-1)?.seq ?? 0)
   const [gutterRows, setGutterRows] = useState<readonly GutterRow[]>([])
 
   connectedRef.current = connected
@@ -121,6 +126,8 @@ export function XtermSerialTerminal({
       disposed: false,
       lastQueuedSeq: 0,
       receiveTail: [],
+      replayThroughSeq: replayThroughSeqRef.current,
+      processingRxSeq: undefined,
       gutterSignature: '',
     }
     runtimeRef.current = runtime
@@ -128,6 +135,8 @@ export function XtermSerialTerminal({
     const refresh = () => { refreshGutter(runtime, setGutterRows) }
     const dataDisposable = terminal.onData(data => {
       if (!connectedRef.current || data.length === 0) return
+      if (isReplayingTerminalEvent(runtime.replayThroughSeq, runtime.processingRxSeq)
+        && isTerminalGeneratedReply(data)) return
       const outgoing = mapTerminalInput(data, lineEndingRef.current)
       if (outgoing.length === 0) return
       void textInputRef.current(outgoing).catch(() => undefined)
@@ -224,7 +233,9 @@ function drainEvents(
   const refresh = () => { refreshGutter(runtime, setRows) }
   if (event.type === 'rx') {
     const startLine = currentLine(runtime.terminal)
+    runtime.processingRxSeq = event.seq
     runtime.terminal.write(decodeBase64(event.dataBase64), () => {
+      runtime.processingRxSeq = undefined
       if (!runtime.disposed) {
         const span = describeReceiveSpan(
           event.seq,
