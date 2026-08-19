@@ -1,17 +1,69 @@
 {
-  "name": "dsh-serial-console-workspace",
+  "name": "@infinitepersistence/dsh-serial-console",
   "version": "0.1.0-alpha.0",
-  "private": true,
-  "description": "Standalone serial console core and React client for DeepSeek Harness",
+  "description": "Auditable serial console for DeepSeek Harness with shared user and AI access",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./client/serial-console.css": "./dist/client/serial-console.css",
+    "./serial": {
+      "types": "./dist/serial/index.d.ts",
+      "import": "./dist/serial/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/InfinitePersistence/dsh-serial-console.git"
+  },
+  "homepage": "https://github.com/InfinitePersistence/dsh-serial-console#readme",
+  "bugs": {
+    "url": "https://github.com/InfinitePersistence/dsh-serial-console/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "plugin",
+    "serial",
+    "uart",
+    "xterm",
+    "embedded"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

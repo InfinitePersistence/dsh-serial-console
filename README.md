@@ -85,6 +85,20 @@ Text 模式提供真实的 VT 终端交互。板卡返回的提示符、ANSI 颜
 
 ### 获取并构建
 
+从 npm 安装可复用包：
+
+```bash
+pnpm add @infinitepersistence/dsh-serial-console
+```
+
+包提供以下公开入口：
+
+- `@infinitepersistence/dsh-serial-console/protocol`：共享串口协议类型与编解码。
+- `@infinitepersistence/dsh-serial-console/serial`：Node.js Host 串口管理与审计能力。
+- `@infinitepersistence/dsh-serial-console/client`：React 与 xterm.js 串口控制台。
+
+从源码构建：
+
 ```bash
 git clone https://github.com/InfinitePersistence/dsh-serial-console.git
 cd dsh-serial-console
