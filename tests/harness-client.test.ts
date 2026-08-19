@@ -88,8 +88,11 @@ async function mountedStore(snapshotInvocation: SnapshotInvocation): Promise<Ser
     } as const),
   }
   const ctx = {
+    get: (name: string) => {
+      if (name === 'remote.serialConsole') return api
+      return undefined
+    },
     remote: {
-      serialConsole: api,
       $mount: async () => async () => undefined,
     },
     effect: () => undefined,

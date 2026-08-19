@@ -35,8 +35,9 @@ interface SerialRemoteNamespace {
 }
 
 interface ClientContext extends Context {
+  get(name: 'remote.serialConsole'): SerialRemoteNamespace
+  get(name: string): unknown
   remote: {
-    readonly serialConsole: SerialRemoteNamespace
     $mount(contribution: typeof serialRemote): Promise<() => Promise<void>>
   }
   slots: {
@@ -50,13 +51,22 @@ interface ClientContext extends Context {
 
 export const inject = ['slots', 'remote']
 
-/** Mount the serial Remote namespace, then expose one conversation Serial tab. */
+/**
+ * Mount the serial Remote namespace, then expose one conversation Serial tab.
+ *
+ * This bundle mounts and consumes the namespace in one entry, so it cannot
+ * declare `remote.serialConsole` in `inject`: the namespace service only comes
+ * into existence while this very apply runs, and a PENDING fiber never runs.
+ * Cordis therefore gates `ctx.remote.serialConsole` reads behind that inject
+ * declaration. `ctx.get()` is the documented no-inject read path, and after
+ * `$mount()` settled the namespace fiber is ACTIVE, so the read is safe.
+ */
 export async function apply(baseContext: Context): Promise<void> {
   const ctx = baseContext as ClientContext
   const disposeRemote = await ctx.remote.$mount(serialRemote)
   ctx.effect(() => disposeRemote, 'dsh-serial-console: unmount browser Remote')
 
-  const api = ctx.remote.serialConsole
+  const api = ctx.get('remote.serialConsole') as SerialRemoteNamespace
   const remote: SerialConsoleRemote = {
     listPorts: async () => unwrap(await api.listPorts()),
     connect: async request => unwrap(await api.connect(request)),

@@ -102,6 +102,8 @@ Store 在挂载期间持续保持一个 snapshot 请求。正常情况下使用 
 
 `snapshot()` 和 `waitSnapshot()` 的 Typert 描述都声明 carrier cancellation。前者不需要 Host 业务逻辑等待，但 Browser 仍可停止等待网络响应；后者把相同 signal 继续传入 `SerialSessionManager`，用于注销 listener 和 timer。Host ring 过期时返回 `truncated=true`，Client 替换本地窗口并显示缺口提示。
 
+单包客户端同时 mount 又消费 `remote.serialConsole`。Cordis 对 `ctx.remote.<namespace>` 的访问按 fiber `inject` 门控（未声明会抛 `cannot get property "remote.serialConsole" without inject`），但 namespace 服务只有在本插件 apply 运行 `$mount` 后才会出现，写进 `inject` 会让 fiber 永久 PENDING。因此单包形态在 `$mount` 完成后用 Cordis 的免 inject 读取通道 `ctx.get('remote.serialConsole')` 取 namespace；拆成独立 mount 包（见 integration 蓝图）时应改用 inject 声明 `remote.serialConsole`。
+
 ## 模型上下文
 
 浏览器可以显示完整当前窗口，模型不能自动接收所有 RX。推荐工具：
