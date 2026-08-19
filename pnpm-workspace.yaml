@@ -1,2 +1,4 @@
+autoInstallPeers: false
+
 allowBuilds:
   '@serialport/bindings-cpp': true

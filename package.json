@@ -1,6 +1,6 @@
 {
   "name": "@infinitepersistence/dsh-serial-console",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "description": "Auditable serial console for DeepSeek Harness with shared user and AI access",
   "license": "MIT",
   "type": "module",
@@ -11,11 +11,27 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./typert": {
+      "types": "./dist/harness/typert.d.ts",
+      "default": "./dist/harness/typert.js"
+    },
+    "./remote": {
+      "types": "./dist/harness/remote.d.ts",
+      "default": "./dist/harness/remote.js"
+    },
+    "./tool": {
+      "types": "./dist/harness/tool.d.ts",
+      "default": "./dist/harness/tool.js"
+    },
     "./protocol": {
       "types": "./dist/protocol.d.ts",
       "import": "./dist/protocol.js"
     },
     "./client": {
+      "types": "./dist/harness/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./react": {
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.js"
     },
@@ -28,6 +44,7 @@
   },
   "files": [
     "dist",
+    "cordis.patch.yml",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
@@ -35,6 +52,19 @@
   "sideEffects": [
     "**/*.css"
   ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
+    }
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/InfinitePersistence/dsh-serial-console.git"
@@ -62,19 +92,31 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && tsdown",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "serialport": "^13.0.0"
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-system-prompt": ">=0.0.1-rc.1 <0.1.0",
+    "@deepseek-ai/dsh-tools": ">=0.0.1-rc.1 <0.1.0",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.1.0-rc.6 <0.2.0",
     "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-system-prompt": { "optional": true },
+    "@deepseek-ai/dsh-tools": { "optional": true },
+    "@deepseek-ai/dsh-typert-protocol": { "optional": true },
+    "react": { "optional": true }
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -82,7 +124,10 @@
     "@types/react-dom": "~18.3.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "serialport": "^13.0.0",
+    "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
+    "unrun": "^0.3.1",
     "vitest": "^4.1.8"
   }
 }

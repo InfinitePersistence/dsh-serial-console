@@ -113,6 +113,13 @@ export interface SerialSendResult {
   readonly byteLength: number
 }
 
+/** Wire request used by the Harness Remote mark endpoint. */
+export interface SerialMarkRequest {
+  readonly label: string
+  readonly actor: SerialActor
+  readonly toolCallId?: string
+}
+
 export interface SerialExpectRequest {
   readonly pattern: string
   readonly flags?: string

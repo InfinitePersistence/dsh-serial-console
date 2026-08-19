@@ -84,23 +84,34 @@ Text 模式提供真实的 VT 终端交互。板卡返回的提示符、ANSI 颜
 
 ### 从 npm 安装
 
-项目已发布到 [`@infinitepersistence/dsh-serial-console`](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)。当前为 Alpha 版本，建议明确使用 `next` 标签安装：
+项目已发布到 [`@infinitepersistence/dsh-serial-console`](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)。如果你已经有名为 `web` 的 DSH profile，一条命令即可安装并启用 Host、网页串口页和模型工具：
+
+```bash
+dsh plugin --profile web add @infinitepersistence/dsh-serial-console@next
+```
+
+然后照常启动 Web profile：
+
+```bash
+dsh web
+```
+
+`dsh plugin add` 与普通 `npm install`/`pnpm add` 不同：它会读取包内的 `dsh.bundle` 清单，把插件 patch 加入指定 profile，并在下次启动时自动挂载。插件已经携带 serialport 的官方多平台预编译二进制，不需要额外批准原生构建脚本。
+
+如果只是把控制台作为 React/Node.js 库嵌入自己的程序，可以使用：
 
 ```bash
 pnpm add @infinitepersistence/dsh-serial-console@next
-```
-
-使用 npm：
-
-```bash
-npm install @infinitepersistence/dsh-serial-console@next
 ```
 
 包提供以下公开入口：
 
 - `@infinitepersistence/dsh-serial-console/protocol`：共享串口协议类型与编解码。
 - `@infinitepersistence/dsh-serial-console/serial`：Node.js Host 串口管理与审计能力。
-- `@infinitepersistence/dsh-serial-console/client`：React 与 xterm.js 串口控制台。
+- `@infinitepersistence/dsh-serial-console`：DSH Host 串口服务。
+- `@infinitepersistence/dsh-serial-console/tool`：模型串口工具插件。
+- `@infinitepersistence/dsh-serial-console/client`：DSH Web 预构建客户端。
+- `@infinitepersistence/dsh-serial-console/react`：可嵌入其他 React 应用的 xterm.js 控制台。
 
 ### 从源码构建
 
@@ -112,7 +123,7 @@ pnpm install
 pnpm build
 ```
 
-当前仓库主要提供可复用源码、React 控制台和 DeepSeek Harness 接入示例，不是一个双击即可运行的独立桌面应用。Harness 集成说明见 [`integration/deepseek-harness/`](./integration/deepseek-harness/README.md)。
+本项目是 DeepSeek Harness 的可安装组合插件，同时也提供可复用的协议、Node.js 串口核心和 React 控制台；它不是一个双击即可运行的独立桌面应用。
 
 ## 当前状态
 
@@ -131,7 +142,7 @@ pnpm build
 ## 项目文档
 
 - [架构与设计边界](./docs/ARCHITECTURE.md)
-- [DeepSeek Harness 接入示例](./integration/deepseek-harness/README.md)
+- [上游 Harness monorepo 拆包参考](./integration/deepseek-harness/README.md)
 - [第三方许可证](./THIRD_PARTY_NOTICES.md)
 
 ## 参与贡献

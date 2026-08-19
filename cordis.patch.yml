@@ -1,0 +1,11 @@
+# Installed by `dsh plugin --profile <profile> add` as one profile bundle layer.
+- insert:
+    - id: community-serial-console
+      name: '@infinitepersistence/dsh-serial-console'
+      config:
+        logDirectory: !!js dshHomePath('serial-logs')
+        ringCapacity: 20000
+        snapshotLimit: 2000
+
+    - id: community-tool-serial-console
+      name: '@infinitepersistence/dsh-serial-console/tool'
