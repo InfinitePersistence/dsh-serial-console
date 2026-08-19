@@ -46,6 +46,7 @@ const SNAPSHOT_TIMEOUT_MESSAGE = 'Serial snapshot timed out; polling will retry.
 /**
  * Browser-side polling store. Physical writes are serialized in one FIFO;
  * xterm owns terminal editing and the Host remains authoritative for events.
+ * Empty unchanged polls preserve the published snapshot reference.
  */
 export class SerialConsoleStore {
   private readonly listeners = new Set<() => void>()
@@ -242,27 +243,39 @@ export class SerialConsoleStore {
   }
 
   private applyRemote(remote: SerialSnapshot, forceReset: boolean): void {
-    const changedSession = remote.sessionId !== this.state.remote.sessionId
+    const current = this.state
+    const changedSession = remote.sessionId !== current.remote.sessionId
     const replaceWindow = forceReset || changedSession || remote.truncated
     const merged = replaceWindow
       ? [...remote.events]
-      : appendUnique(this.state.events, remote.events)
+      : appendUnique(current.events, remote.events)
     const events = merged.length > this.maxClientEvents
       ? merged.slice(merged.length - this.maxClientEvents)
       : merged
     const remoteSelection = remote.status === 'connected' ? remote.port : undefined
+    const selectedPath = remoteSelection?.path ?? current.selectedPath
+    const baudRate = remoteSelection === undefined
+      ? current.baudRate
+      : String(remoteSelection.baudRate)
+    const gapDetected = current.gapDetected || remote.truncated
+    const lastError = remote.status === 'error'
+      ? remote.events.findLast(event => event.type === 'error')?.message ?? current.lastError
+      : current.lastError
+    if (!forceReset
+      && events === current.events
+      && sameSnapshotMetadata(current.remote, remote)
+      && selectedPath === current.selectedPath
+      && baudRate === current.baudRate
+      && gapDetected === current.gapDetected
+      && lastError === current.lastError) return
     this.replace({
-      ...this.state,
+      ...current,
       remote,
       events,
-      selectedPath: remoteSelection?.path ?? this.state.selectedPath,
-      baudRate: remoteSelection === undefined
-        ? this.state.baudRate
-        : String(remoteSelection.baudRate),
-      gapDetected: this.state.gapDetected || remote.truncated,
-      lastError: remote.status === 'error'
-        ? remote.events.findLast(event => event.type === 'error')?.message ?? this.state.lastError
-        : this.state.lastError,
+      selectedPath,
+      baudRate,
+      gapDetected,
+      lastError,
     })
   }
 
@@ -290,9 +303,34 @@ export class SerialConsoleStore {
   }
 }
 
-function appendUnique(existing: readonly SerialEvent[], incoming: readonly SerialEvent[]): SerialEvent[] {
+function appendUnique(
+  existing: readonly SerialEvent[],
+  incoming: readonly SerialEvent[],
+): readonly SerialEvent[] {
+  if (incoming.length === 0) return existing
   const lastSeq = existing.at(-1)?.seq ?? 0
-  return [...existing, ...incoming.filter(event => event.seq > lastSeq)]
+  const appended = incoming.filter(event => event.seq > lastSeq)
+  return appended.length === 0 ? existing : [...existing, ...appended]
+}
+
+function sameSnapshotMetadata(left: SerialSnapshot, right: SerialSnapshot): boolean {
+  return left.sessionId === right.sessionId
+    && left.status === right.status
+    && sameOpenOptions(left.port, right.port)
+    && left.earliestSeq === right.earliestSeq
+    && left.nextSeq === right.nextSeq
+    && left.truncated === right.truncated
+}
+
+function sameOpenOptions(left: SerialOpenOptions | undefined, right: SerialOpenOptions | undefined): boolean {
+  if (left === right) return true
+  if (left === undefined || right === undefined) return false
+  return left.path === right.path
+    && left.baudRate === right.baudRate
+    && left.dataBits === right.dataBits
+    && left.stopBits === right.stopBits
+    && left.parity === right.parity
+    && left.rtscts === right.rtscts
 }
 
 function positiveInteger(value: number, name: string): number {

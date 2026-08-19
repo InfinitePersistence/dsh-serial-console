@@ -68,6 +68,36 @@ describe('SerialConsoleStore', () => {
     ])
   })
 
+  it('preserves state and event references for an empty unchanged snapshot', async () => {
+    const remote = new FakeRemote()
+    const port = { path: 'COM_TEST', baudRate: 115_200 } as const
+    remote.snapshots.push(
+      snapshot([rx(1, 'one')], { port }),
+      snapshot([], { port: { ...port }, earliestSeq: 1, nextSeq: 2 }),
+      snapshot([], { status: 'disconnected', port: { ...port }, earliestSeq: 1, nextSeq: 2 }),
+    )
+    const store = new SerialConsoleStore(remote)
+
+    await store.refresh()
+    const before = store.getSnapshot()
+    let notifications = 0
+    const dispose = store.subscribe(() => { notifications += 1 })
+
+    await store.refresh()
+
+    expect(store.getSnapshot()).toBe(before)
+    expect(store.getSnapshot().events).toBe(before.events)
+    expect(notifications).toBe(0)
+
+    await store.refresh()
+
+    expect(store.getSnapshot()).not.toBe(before)
+    expect(store.getSnapshot().events).toBe(before.events)
+    expect(store.getSnapshot().remote.status).toBe('disconnected')
+    expect(notifications).toBe(1)
+    dispose()
+  })
+
   it('replaces an expired event window and retains a visible gap flag', async () => {
     const remote = new FakeRemote()
     remote.snapshots.push(
