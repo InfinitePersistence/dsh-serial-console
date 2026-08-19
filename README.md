@@ -2,6 +2,7 @@
 
 用户与 AI 模型共享同一个可审计的嵌入式串口会话。~~（D指导，我不想再复制粘贴了，你直接干活吧）~~
 
+[![npm](https://img.shields.io/npm/v/%40infinitepersistence%2Fdsh-serial-console?label=npm)](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 DSH Serial Console 是一个面向 DeepSeek Harness 的社区串口控制台项目。它把人工终端操作、模型工具调用、板卡输出和会话记录汇集在同一个控制台中，适用于 Linux 开发板、U-Boot、MCU Shell、AT 指令设备和其他串口调试场景。
@@ -83,12 +84,18 @@ Text 模式提供真实的 VT 终端交互。板卡返回的提示符、ANSI 颜
 - pnpm 11
 - Windows 或 Linux 串口环境
 
-### 获取并构建
+### 从 npm 安装
 
-从 npm 安装可复用包：
+项目已发布到 [`@infinitepersistence/dsh-serial-console`](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)。当前为 Alpha 版本，建议明确使用 `next` 标签安装：
 
 ```bash
-pnpm add @infinitepersistence/dsh-serial-console
+pnpm add @infinitepersistence/dsh-serial-console@next
+```
+
+使用 npm：
+
+```bash
+npm install @infinitepersistence/dsh-serial-console@next
 ```
 
 包提供以下公开入口：
@@ -97,7 +104,7 @@ pnpm add @infinitepersistence/dsh-serial-console
 - `@infinitepersistence/dsh-serial-console/serial`：Node.js Host 串口管理与审计能力。
 - `@infinitepersistence/dsh-serial-console/client`：React 与 xterm.js 串口控制台。
 
-从源码构建：
+### 从源码构建
 
 ```bash
 git clone https://github.com/InfinitePersistence/dsh-serial-console.git
