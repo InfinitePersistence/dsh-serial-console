@@ -21,9 +21,11 @@ export function apply(ctx: Context): void {
     disconnect: async () => unwrap(await api.disconnect({})),
     snapshot: async (request, signal) => await invokeRemote(
       () => api.snapshot(request ?? {}, signal),
+      signal,
     ),
     waitSnapshot: async (request, signal) => await invokeRemote(
       () => api.waitSnapshot(request, signal),
+      signal,
     ),
     send: async request => unwrap(await api.send(request)),
     mark: async (label, actor, toolCallId) => unwrap(await api.mark({ label, actor, toolCallId })),
@@ -45,15 +47,27 @@ function unwrap<T>(result: RemoteResult<T>): T {
   return result.value
 }
 
-async function invokeRemote<T>(operation: () => Promise<RemoteResult<T>>): Promise<T> {
+async function invokeRemote<T>(
+  operation: () => Promise<RemoteResult<T>>,
+  signal?: AbortSignal,
+): Promise<T> {
   let result: RemoteResult<T>
   try {
     result = await operation()
   } catch (error) {
+    if (signal?.aborted === true) throw abortReason(signal)
+    if (error instanceof SerialRemoteError) throw error
     throw new SerialRemoteError(
       'client-invocation-failed',
       error instanceof Error ? error.message : String(error),
     )
   }
   return unwrap(result)
+}
+
+function abortReason(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason
+  const error = new Error('serial Remote invocation aborted')
+  error.name = 'AbortError'
+  return error
 }

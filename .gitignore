@@ -1,8 +1,8 @@
 node_modules/
+.pnpm-store/
 dist/
 coverage/
 *.log
 .DS_Store
 .idea/
 .vscode/
-

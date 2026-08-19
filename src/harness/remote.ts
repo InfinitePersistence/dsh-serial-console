@@ -70,7 +70,10 @@ const snapshot = z.object({
   truncated: z.boolean(),
   events: z.array(event),
 })
-const snapshotRequest = z.object({ afterSeq: z.number().optional(), limit: z.number().optional() })
+const snapshotRequest = z.object({
+  afterSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  limit: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
+})
 const waitSnapshotRequest = snapshotRequest.extend({
   waitMs: z.number().int().min(0).max(1_000).optional(),
 })

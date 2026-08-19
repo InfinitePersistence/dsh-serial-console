@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { SerialSessionManager, SerialExpectTimeoutError } from '../src/serial/session-manager.js'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  SerialSessionManager,
+  SerialExpectTimeoutError,
+  SerialSessionManagerClosedError,
+} from '../src/serial/session-manager.js'
+import { SERIAL_WAIT_SNAPSHOT_CAPABILITY } from '../src/protocol.js'
 import { FakeSerialTransportFactory, deferred } from './fake-transport.js'
 
 function manager(factory: FakeSerialTransportFactory, ringCapacity = 20) {
@@ -103,5 +108,91 @@ describe('SerialSessionManager', () => {
     factory.transports[0]?.emitData(new TextEncoder().encode('still captured'))
     expect(serial.snapshot().events.at(-1)).toMatchObject({ type: 'rx', text: 'still captured' })
   })
-})
 
+  it('advertises wait capability and returns immediately when waitMs is zero', async () => {
+    const factory = new FakeSerialTransportFactory()
+    const serial = manager(factory)
+    await serial.connect({ path: 'COM_TEST', baudRate: 115_200 })
+    const cursor = serial.snapshot().nextSeq - 1
+
+    const result = await serial.waitSnapshot({ afterSeq: cursor, waitMs: 0 })
+
+    expect(result.capabilities?.waitSnapshot).toBe(SERIAL_WAIT_SNAPSHOT_CAPABILITY)
+    expect(result.events).toEqual([])
+  })
+
+  it('wakes a waiter with the first event published after its cursor', async () => {
+    const factory = new FakeSerialTransportFactory()
+    const serial = manager(factory)
+    await serial.connect({ path: 'COM_TEST', baudRate: 115_200 })
+    const cursor = serial.snapshot().nextSeq - 1
+    const waiting = serial.waitSnapshot({ afterSeq: cursor, waitMs: 1_000 })
+
+    factory.transports[0]?.emitData(new TextEncoder().encode('ready'))
+
+    await expect(waiting).resolves.toMatchObject({
+      events: [{ type: 'rx', text: 'ready' }],
+    })
+  })
+
+  it('returns an empty snapshot when the wait duration expires', async () => {
+    const factory = new FakeSerialTransportFactory()
+    const serial = manager(factory)
+    await serial.connect({ path: 'COM_TEST', baudRate: 115_200 })
+    const cursor = serial.snapshot().nextSeq - 1
+
+    const result = await serial.waitSnapshot({ afterSeq: cursor, waitMs: 5 })
+
+    expect(result.events).toEqual([])
+    expect(result.nextSeq).toBe(cursor + 1)
+  })
+
+  it('sees an event published between the first snapshot and subscription', async () => {
+    const factory = new FakeSerialTransportFactory()
+    const serial = manager(factory)
+    await serial.connect({ path: 'COM_TEST', baudRate: 115_200 })
+    const cursor = serial.snapshot().nextSeq - 1
+    const originalSnapshot = serial.snapshot.bind(serial)
+    const snapshotSpy = vi.spyOn(serial, 'snapshot')
+    snapshotSpy.mockImplementationOnce((afterSeq = 0, limit = 20) => {
+      const result = originalSnapshot(afterSeq, limit)
+      factory.transports[0]?.emitData(new TextEncoder().encode('between'))
+      return result
+    })
+
+    const result = await serial.waitSnapshot({ afterSeq: cursor, waitMs: 1_000 })
+
+    expect(result.events).toMatchObject([{ type: 'rx', text: 'between' }])
+    expect(snapshotSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('removes an aborted waiter before later serial events arrive', async () => {
+    const factory = new FakeSerialTransportFactory()
+    const serial = manager(factory)
+    await serial.connect({ path: 'COM_TEST', baudRate: 115_200 })
+    const cursor = serial.snapshot().nextSeq - 1
+    const snapshotSpy = vi.spyOn(serial, 'snapshot')
+    const controller = new AbortController()
+    const waiting = serial.waitSnapshot({ afterSeq: cursor, waitMs: 1_000 }, controller.signal)
+    const callsBeforeAbort = snapshotSpy.mock.calls.length
+
+    controller.abort(new Error('cancelled by test'))
+    await expect(waiting).rejects.toThrow('cancelled by test')
+    factory.transports[0]?.emitData(new TextEncoder().encode('after abort'))
+
+    expect(snapshotSpy).toHaveBeenCalledTimes(callsBeforeAbort)
+  })
+
+  it('rejects active snapshot waiters when the manager closes', async () => {
+    const factory = new FakeSerialTransportFactory()
+    const serial = manager(factory)
+    await serial.connect({ path: 'COM_TEST', baudRate: 115_200 })
+    const cursor = serial.snapshot().nextSeq - 1
+    const waiting = serial.waitSnapshot({ afterSeq: cursor, waitMs: 1_000 })
+
+    const closing = serial.close()
+
+    await expect(waiting).rejects.toBeInstanceOf(SerialSessionManagerClosedError)
+    await closing
+  })
+})

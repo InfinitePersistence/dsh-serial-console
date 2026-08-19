@@ -42,4 +42,25 @@ describe('DSH installable bundle', () => {
     ])
     expect(TYPERT.invocations).toBe(TYPERT_REMOTE.descriptors)
   })
+
+  it('rejects invalid snapshot cursors, limits, and wait durations at the Remote boundary', () => {
+    const snapshotDescriptor = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'snapshot')
+    const waitDescriptor = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'waitSnapshot')
+    const snapshotSchema = snapshotDescriptor?.parameters[0]?.codec.schema as {
+      parse(value: unknown): unknown
+    }
+    const waitSchema = waitDescriptor?.parameters[0]?.codec.schema as {
+      parse(value: unknown): unknown
+    }
+
+    expect(() => { snapshotSchema.parse({ afterSeq: -1, limit: 1 }) }).toThrow()
+    expect(() => { snapshotSchema.parse({ afterSeq: 0.5, limit: 1 }) }).toThrow()
+    expect(() => { snapshotSchema.parse({ afterSeq: 0, limit: 0 }) }).toThrow()
+    expect(() => { waitSchema.parse({ afterSeq: 0, limit: 1, waitMs: 1_001 }) }).toThrow()
+    expect(waitSchema.parse({ afterSeq: 0, limit: 1, waitMs: 0 })).toEqual({
+      afterSeq: 0,
+      limit: 1,
+      waitMs: 0,
+    })
+  })
 })
