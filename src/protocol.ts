@@ -81,10 +81,19 @@ export type SerialEvent =
   | SerialMarkerEvent
   | SerialErrorEvent
 
+/** Versioned declaration that this Host supports cancellable snapshot waiting. */
+export const SERIAL_WAIT_SNAPSHOT_CAPABILITY = 'v1' as const
+
+export interface SerialSnapshotCapabilities {
+  readonly waitSnapshot: typeof SERIAL_WAIT_SNAPSHOT_CAPABILITY
+}
+
 export interface SerialSnapshot {
   readonly sessionId?: string
   readonly status: SerialConnectionStatus
   readonly port?: SerialOpenOptions
+  /** Absent on legacy Hosts; new Browsers use this before calling waitSnapshot(). */
+  readonly capabilities?: SerialSnapshotCapabilities
   /** Sequence of the oldest retained event, or nextSeq when the buffer is empty. */
   readonly earliestSeq: number
   /** Sequence that will be assigned to the next event. */
@@ -97,6 +106,10 @@ export interface SerialSnapshot {
 export interface SerialSnapshotRequest {
   readonly afterSeq?: number
   readonly limit?: number
+}
+
+export interface SerialWaitSnapshotRequest extends SerialSnapshotRequest {
+  readonly waitMs?: number
 }
 
 export interface SerialSendRequest {
@@ -136,11 +149,24 @@ export interface SerialExpectResult {
   readonly index: number
 }
 
+/** Structured failure returned by a Harness Remote call. */
+export class SerialRemoteError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly details: object = {},
+  ) {
+    super(message)
+    this.name = 'SerialRemoteError'
+  }
+}
+
 export interface SerialConsoleRemote {
   listPorts(): Promise<readonly SerialPortDescriptor[]>
   connect(options: SerialOpenOptions): Promise<SerialSnapshot>
   disconnect(): Promise<SerialSnapshot>
-  snapshot(request?: SerialSnapshotRequest): Promise<SerialSnapshot>
+  snapshot(request?: SerialSnapshotRequest, signal?: AbortSignal): Promise<SerialSnapshot>
+  waitSnapshot(request: SerialWaitSnapshotRequest, signal?: AbortSignal): Promise<SerialSnapshot>
   send(request: SerialSendRequest): Promise<SerialSendResult>
   mark(label: string, actor: SerialActor, toolCallId?: string): Promise<SerialMarkerEvent>
 }

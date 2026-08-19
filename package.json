@@ -1,6 +1,6 @@
 {
   "name": "@infinitepersistence/dsh-serial-console",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Auditable serial console for DeepSeek Harness with shared user and AI access",
   "license": "MIT",
   "type": "module",

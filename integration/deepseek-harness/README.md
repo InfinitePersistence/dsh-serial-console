@@ -32,7 +32,8 @@ Service 应继承 `TypertRemoteService`，namespace 使用 `serialConsole`。所
 listPorts(request: {}): Promise<readonly SerialPortDescriptor[]>
 connect(request: SerialOpenOptions): Promise<SerialSnapshot>
 disconnect(request: {}): Promise<SerialSnapshot>
-snapshot(request: SerialSnapshotRequest): SerialSnapshot
+snapshot(request: SerialSnapshotRequest, signal?: AbortSignal): SerialSnapshot
+waitSnapshot(request: SerialWaitSnapshotRequest, signal: AbortSignal): Promise<SerialSnapshot>
 send(request: SerialSendRequest): Promise<SerialSendResult>
 mark(request: { label: string; actor: SerialActor; toolCallId?: string }): SerialMarkerEvent
 ```
@@ -121,13 +122,11 @@ ctx.slots.inject('conversation.view', () => ctx.slots.register({
 
 生成的 `ctx.remote.serialConsole.*` 返回 `RemoteResult<T>`，Client adapter 必须显式解包 carrier failure，再传给 `SerialConsoleStore` 所需的直接 `Promise<T>` 接口。
 
-## 为什么先轮询
+## 事件同步
 
-Typert Remote 当前只支持 unary 方法。`api-remotes` 的 Host event 转发又由固定 allowlist 控制，外部包不能只靠类型声明自动增加 runtime forwarding。因此当前工作区使用 `snapshot(afterSeq)` 短轮询，不修改上游事件白名单。
+Typert Remote 仍使用 unary 方法。新 Host 的普通快照包含可选的 `capabilities.waitSnapshot = 'v1'`；Client 每个 generation 先读取一次普通快照，只有看到该标记才使用可取消的 `waitSnapshot({ afterSeq, limit, waitMs }, signal)`。标记缺失时直接使用 150 ms 兼容轮询。默认等待 750 ms，Host 上限 1000 ms；`waitMs = 0` 立即返回，但自动同步仍按兼容轮询间隔节流。积压数据使用普通 `snapshot()` 串行排空，追平后恢复等待。
 
-接入后优先升级为可取消的有界 long-poll：`readBatch({ afterSeq, limit, waitMs }, signal)` 在有事件、超时、断线或 abort 时返回，Client 随即发起下一次调用。建议 `limit <= 200`、`waitMs <= 20_000`，并明确返回 `oldestSeq`/`dropped`。它仍是一请求一结果，符合 unary Remote 约定。
-
-后续需要真正推送时，应先为 Harness 设计独立的增量数据协议/注册点，或向上游提交可扩展的 Host event selection；不能用一个永不返回的 Remote 方法伪造 stream。
+`snapshot()` 和 `waitSnapshot()` 的 Client 描述都应配置 `cancellation: { parameter: 'signal' }`，以便浏览器取消网络请求；长轮询的 signal 还会交给 Host 清理 listener 和 timer。当前 Gateway 会把多类 Host 和 carrier 错误统一转换为 `internal`，Client 不能依赖错误文字恢复原始错误码。opaque `internal` 只有在连续两次由健康且能力一致的普通快照确认后才熔断；普通快照失败时继续退避。Client API 直接拒绝 Promise 则作为本地装配错误立即熔断。
 
 ## 装配示例
 

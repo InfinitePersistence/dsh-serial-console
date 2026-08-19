@@ -94,13 +94,13 @@ xterm 选区主题同时设置 `selectionBackground` 与 `selectionForeground`�
 
 ## Remote 与实时性
 
-当前 Typert Remote 是 unary 请求/结果，不用于增量流。v0.1 使用：
+Typert Remote 使用可取消的 unary 请求。`snapshot()` 保留立即读取语义，供模型工具、能力探测、backlog 排空和旧客户端使用；新 Host 的快照通过可选的 `capabilities.waitSnapshot = 'v1'` 声明等待能力。`waitSnapshot()` 在没有新事件时等待，默认 750 ms、最大 1000 ms；`waitMs = 0` 立即返回，但 Store 会按兼容轮询间隔调度下一次请求，避免高速空转。Host 在订阅前后各读取一次 ring，避免事件恰好出现在首次读取与监听器注册之间。
 
-```text
-snapshot(afterSeq=N, limit=2000) every 150 ms
-```
+Store 在挂载期间持续保持一个 snapshot 请求。正常情况下使用 `waitSnapshot()`，RX、TX、state、error 或 marker 会立即唤醒请求；返回窗口尚未追平 `nextSeq` 或发生 `truncated` 时，改用 `snapshot()` 串行排空 backlog。每个请求都有独立 `AbortController` 和 1500 ms 保护超时。connect、disconnect、stop 和 Remote 卸载会取消旧请求，旧 generation 的结果不能更新当前状态，新请求必须等旧请求真正结算后才能发出。
 
-Host ring 过期时返回 `truncated=true`；Client 显示显眼缺口提示。这个轮询层可以日后无损替换为正式的增量协议，因为 UI store 只依赖 `SerialConsoleRemote`。
+每个 Store generation 先调用普通 `snapshot()`：能力标记缺失时直接切换为 150 ms 兼容轮询，标记存在时才调用 `waitSnapshot()`。当前 Gateway 会把多类 Host 和 carrier 错误统一包装成 `internal`，Store 不从错误文字猜测原因。长轮询收到 opaque `internal` 后会用普通快照诊断；连续两次出现“普通快照成功且仍声明等待能力”才停止当前 generation 的自动同步。普通快照也失败时仍按 100、200、400、500 ms 退避。官方 Client API 直接拒绝 Promise 则属于本地装配失败，会立即熔断。熔断后保留只读操作和 disconnect，直到 Remote 重新挂载。
+
+`snapshot()` 和 `waitSnapshot()` 的 Typert 描述都声明 carrier cancellation。前者不需要 Host 业务逻辑等待，但 Browser 仍可停止等待网络响应；后者把相同 signal 继续传入 `SerialSessionManager`，用于注销 listener 和 timer。Host ring 过期时返回 `truncated=true`，Client 替换本地窗口并显示缺口提示。
 
 ## 模型上下文
 

@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { SerialConsole } from '../client/SerialConsole.js'
 import { SerialConsoleStore } from '../client/serial-console-store.js'
+import { SerialRemoteError } from '../protocol.js'
 import type {
   SerialConsoleRemote,
   SerialMarkRequest,
@@ -12,18 +13,23 @@ import type {
   SerialSendResult,
   SerialSnapshot,
   SerialSnapshotRequest,
+  SerialWaitSnapshotRequest,
 } from '../protocol.js'
 import serialRemote from './remote.js'
 
 type RemoteResult<T> =
   | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
+  | {
+    readonly ok: false
+    readonly error: { readonly code: string; readonly message: string; readonly details: object }
+  }
 
 interface SerialRemoteNamespace {
   listPorts(): Promise<RemoteResult<readonly SerialPortDescriptor[]>>
   connect(request: SerialOpenOptions): Promise<RemoteResult<SerialSnapshot>>
   disconnect(): Promise<RemoteResult<SerialSnapshot>>
-  snapshot(request: SerialSnapshotRequest): Promise<RemoteResult<SerialSnapshot>>
+  snapshot(request: SerialSnapshotRequest, signal?: AbortSignal): Promise<RemoteResult<SerialSnapshot>>
+  waitSnapshot(request: SerialWaitSnapshotRequest, signal?: AbortSignal): Promise<RemoteResult<SerialSnapshot>>
   send(request: SerialSendRequest): Promise<RemoteResult<SerialSendResult>>
   mark(request: SerialMarkRequest): Promise<RemoteResult<SerialMarkerEvent>>
 }
@@ -55,7 +61,12 @@ export async function apply(baseContext: Context): Promise<void> {
     listPorts: async () => unwrap(await api.listPorts()),
     connect: async request => unwrap(await api.connect(request)),
     disconnect: async () => unwrap(await api.disconnect()),
-    snapshot: async request => unwrap(await api.snapshot(request ?? {})),
+    snapshot: async (request, signal) => await invokeRemote(
+      () => api.snapshot(request ?? {}, signal),
+    ),
+    waitSnapshot: async (request, signal) => await invokeRemote(
+      () => api.waitSnapshot(request, signal),
+    ),
     send: async request => unwrap(await api.send(request)),
     mark: async (label, actor, toolCallId) => unwrap(await api.mark({
       label,
@@ -64,7 +75,7 @@ export async function apply(baseContext: Context): Promise<void> {
     })),
   }
   const store = new SerialConsoleStore(remote)
-  ctx.effect(() => () => { store.stop() }, 'dsh-serial-console: stop browser polling')
+  ctx.effect(() => () => { store.stop() }, 'dsh-serial-console: stop browser synchronization')
 
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
@@ -75,6 +86,21 @@ export async function apply(baseContext: Context): Promise<void> {
 }
 
 function unwrap<T>(result: RemoteResult<T>): T {
-  if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+  if (!result.ok) {
+    throw new SerialRemoteError(result.error.code, result.error.message, result.error.details)
+  }
   return result.value
+}
+
+async function invokeRemote<T>(operation: () => Promise<RemoteResult<T>>): Promise<T> {
+  let result: RemoteResult<T>
+  try {
+    result = await operation()
+  } catch (error) {
+    throw new SerialRemoteError(
+      'client-invocation-failed',
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+  return unwrap(result)
 }

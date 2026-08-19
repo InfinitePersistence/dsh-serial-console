@@ -28,9 +28,14 @@ export function SerialConsole({ store }: SerialConsoleProps) {
   )
   const connected = state.remote.status === 'connected'
   const busy = state.remote.status === 'opening' || state.remote.status === 'closing'
+  const synchronizationStopped = state.syncFault !== undefined
+  const disconnectAvailable = connected
+    || (synchronizationStopped && state.remote.status !== 'disconnected')
+  const terminalInputEnabled = connected && !synchronizationStopped
+  const synchronizationError = state.syncFault ?? state.syncError
 
   const toggleConnection = async () => {
-    if (connected) {
+    if (disconnectAvailable) {
       await store.disconnect()
       return
     }
@@ -64,13 +69,19 @@ export function SerialConsole({ store }: SerialConsoleProps) {
           inputMode="numeric"
           onChange={event => { store.setBaudRate(event.target.value) }}
         />
-        <button type="button" disabled={busy || (!connected && state.selectedPath === '')} onClick={() => { void toggleConnection() }}>
-          {connected ? 'Disconnect' : busy ? state.remote.status : 'Connect'}
+        <button
+          type="button"
+          disabled={disconnectAvailable
+            ? busy && !synchronizationStopped
+            : busy || state.selectedPath === '' || synchronizationStopped}
+          onClick={() => { void toggleConnection() }}
+        >
+          {disconnectAvailable ? 'Disconnect' : busy ? state.remote.status : 'Connect'}
         </button>
         <select
           aria-label="Line ending"
           value={state.lineEnding}
-          disabled={!connected}
+          disabled={!terminalInputEnabled}
           title="Bytes sent by the physical Enter key"
           onChange={event => { store.setLineEnding(event.target.value as SerialLineEnding) }}
         >
@@ -98,17 +109,20 @@ export function SerialConsole({ store }: SerialConsoleProps) {
       {state.gapDetected && (
         <div className="dsh-serial-warning">Some in-memory events expired. Export the Host audit log for complete evidence.</div>
       )}
+      {synchronizationError !== undefined && <div className="dsh-serial-error">{synchronizationError}</div>}
       {state.lastError !== undefined && <div className="dsh-serial-error">{state.lastError}</div>}
 
       {mode === 'text' ? (
         <XtermSerialTerminal
           key={`${state.remote.sessionId ?? 'disconnected'}:${hiddenBeforeSeq}`}
           events={visibleEvents}
-          connected={connected}
+          connected={terminalInputEnabled}
           follow={follow}
           lineEnding={state.lineEnding}
-          emptyLabel={connected
-            ? 'Connected: Tab, arrows, paste, and terminal controls are sent directly to the board.'
+          emptyLabel={synchronizationStopped
+            ? 'Serial synchronization stopped. Disconnect or reload the Remote plugin to recover.'
+            : connected
+              ? 'Connected: Tab, arrows, paste, and terminal controls are sent directly to the board.'
             : 'Select a serial port and baud rate, then connect.'}
           onTextInput={text => store.sendTerminalText(text)}
           onBinaryInput={dataBase64 => store.sendTerminalBinary(dataBase64)}

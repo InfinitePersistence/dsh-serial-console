@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { Buffer } from 'node:buffer'
+import { SERIAL_WAIT_SNAPSHOT_CAPABILITY } from '../protocol.js'
 import type {
   SerialActor,
   SerialConnectionStatus,
@@ -11,6 +12,7 @@ import type {
   SerialOpenOptions,
   SerialSendResult,
   SerialSnapshot,
+  SerialWaitSnapshotRequest,
 } from '../protocol.js'
 import { SequenceRing } from './ring-buffer.js'
 import type {
@@ -48,6 +50,16 @@ export class SerialExpectTimeoutError extends Error {
   }
 }
 
+export class SerialSessionManagerClosedError extends Error {
+  constructor() {
+    super('serial session manager closed while waiting for a snapshot')
+    this.name = 'SerialSessionManagerClosedError'
+  }
+}
+
+export const DEFAULT_SERIAL_SNAPSHOT_WAIT_MS = 750
+export const MAX_SERIAL_SNAPSHOT_WAIT_MS = 1_000
+
 /**
  * Single owner of one physical port. Every model and user write enters the same
  * queue, and every RX/TX/state transition receives one Host sequence number.
@@ -55,6 +67,7 @@ export class SerialExpectTimeoutError extends Error {
 export class SerialSessionManager {
   private readonly events: SequenceRing<SerialEvent>
   private readonly listeners = new Set<(event: SerialEvent) => void>()
+  private readonly snapshotWaitClosers = new Set<(error: Error) => void>()
   private readonly snapshotLimit: number
   private readonly sink: SerialEventSink | undefined
   private readonly now: () => number
@@ -69,6 +82,7 @@ export class SerialSessionManager {
   private decoder = new TextDecoder('utf-8', { fatal: false })
   private writeTail: Promise<void> = Promise.resolve()
   private intentionalClose = false
+  private closed = false
 
   constructor(
     private readonly factory: SerialTransportFactory,
@@ -194,11 +208,76 @@ export class SerialSessionManager {
       ...(this.sessionId === undefined ? {} : { sessionId: this.sessionId }),
       status: this.status,
       ...(this.port === undefined ? {} : { port: { ...this.port } }),
+      capabilities: { waitSnapshot: SERIAL_WAIT_SNAPSHOT_CAPABILITY },
       earliestSeq: this.events.earliestSeq ?? this.nextSeq,
       nextSeq: this.nextSeq,
       truncated: slice.truncated,
       events: slice.items,
     }
+  }
+
+  /** Wait for the next event without losing an event published while subscribing. */
+  waitSnapshot(
+    request: SerialWaitSnapshotRequest = {},
+    signal?: AbortSignal,
+  ): Promise<SerialSnapshot> {
+    if (this.closed) return Promise.reject(new SerialSessionManagerClosedError())
+    if (signal?.aborted === true) return Promise.reject(abortReason(signal))
+    const waitMs = request.waitMs ?? DEFAULT_SERIAL_SNAPSHOT_WAIT_MS
+    if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > MAX_SERIAL_SNAPSHOT_WAIT_MS) {
+      throw new TypeError(`waitMs must be a safe integer between 0 and ${MAX_SERIAL_SNAPSHOT_WAIT_MS}`)
+    }
+    const takeSnapshot = () => this.snapshot(
+      request.afterSeq ?? 0,
+      request.limit ?? this.snapshotLimit,
+    )
+    const initial = takeSnapshot()
+    if (waitMs === 0 || snapshotHasChanges(initial)) return Promise.resolve(initial)
+
+    return new Promise((resolve, reject) => {
+      let settled = false
+      let dispose: Dispose = () => undefined
+      let timer: ReturnType<typeof setTimeout> | undefined
+
+      const cleanup = () => {
+        dispose()
+        if (timer !== undefined) clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        this.snapshotWaitClosers.delete(onClose)
+      }
+      const settle = (action: () => void) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        action()
+      }
+      const resolveLatest = () => {
+        try {
+          const latest = takeSnapshot()
+          settle(() => { resolve(latest) })
+        } catch (error) {
+          settle(() => { reject(error) })
+        }
+      }
+      const rejectWith = (error: Error) => { settle(() => { reject(error) }) }
+      const onAbort = () => { rejectWith(abortReason(signal as AbortSignal)) }
+      const onClose = (error: Error) => { rejectWith(error) }
+
+      dispose = this.subscribe(resolveLatest)
+      this.snapshotWaitClosers.add(onClose)
+      signal?.addEventListener('abort', onAbort, { once: true })
+
+      try {
+        const second = takeSnapshot()
+        if (snapshotHasChanges(second)) {
+          settle(() => { resolve(second) })
+          return
+        }
+        timer = setTimeout(resolveLatest, waitMs)
+      } catch (error) {
+        settle(() => { reject(error) })
+      }
+    })
   }
 
   subscribe(listener: (event: SerialEvent) => void): Dispose {
@@ -279,6 +358,10 @@ export class SerialSessionManager {
   }
 
   async close(): Promise<void> {
+    if (this.closed) return
+    this.closed = true
+    const closeError = new SerialSessionManagerClosedError()
+    for (const closeWaiter of [...this.snapshotWaitClosers]) closeWaiter(closeError)
     if (this.transport !== undefined) await this.disconnect().catch(() => undefined)
     await this.sink?.flush?.()
     await this.sink?.close?.()
@@ -349,6 +432,17 @@ export class SerialSessionManager {
     for (const dispose of this.transportDisposers.splice(0)) dispose()
     this.transport = undefined
   }
+}
+
+function snapshotHasChanges(snapshot: SerialSnapshot): boolean {
+  return snapshot.truncated || snapshot.events.length > 0
+}
+
+function abortReason(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason
+  const error = new Error('serial snapshot wait aborted')
+  error.name = 'AbortError'
+  return error
 }
 
 function validateOpenOptions(options: SerialOpenOptions): void {

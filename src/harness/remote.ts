@@ -1,5 +1,6 @@
 /** Hand-authored strict Typert descriptors shared by Host and browser faces. */
 import { z } from 'zod'
+import { SERIAL_WAIT_SNAPSHOT_CAPABILITY } from '../protocol.js'
 import type {
   InvocationDescriptor,
   TypertRemoteContribution,
@@ -61,12 +62,18 @@ const snapshot = z.object({
   sessionId: z.string().optional(),
   status,
   port: openOptions.optional(),
+  capabilities: z.object({
+    waitSnapshot: z.literal(SERIAL_WAIT_SNAPSHOT_CAPABILITY),
+  }).optional(),
   earliestSeq: z.number(),
   nextSeq: z.number(),
   truncated: z.boolean(),
   events: z.array(event),
 })
 const snapshotRequest = z.object({ afterSeq: z.number().optional(), limit: z.number().optional() })
+const waitSnapshotRequest = snapshotRequest.extend({
+  waitMs: z.number().int().min(0).max(1_000).optional(),
+})
 const sendRequest = z.object({
   actor,
   text: z.string().optional(),
@@ -96,6 +103,7 @@ function descriptor(
   method: string,
   parameter: { readonly type: string; readonly schema: z.ZodType } | undefined,
   result: { readonly type: string; readonly schema: z.ZodType },
+  cancellable = false,
 ): InvocationDescriptor {
   return {
     id: `${PACKAGE_NAME}#serialConsole/${method}`,
@@ -109,6 +117,7 @@ function descriptor(
       source: 'json',
       codec: codec(parameter.type, parameter.schema),
     }],
+    ...(cancellable ? { cancellation: { parameter: 'signal' as const } } : {}),
     result: codec(result.type, result.schema),
   }
 }
@@ -119,7 +128,8 @@ export const SERIAL_REMOTE_DESCRIPTORS: readonly InvocationDescriptor[] = [
   descriptor('listPorts', undefined, { type: `${PACKAGE_NAME}/protocol#SerialPortDescriptor[]`, schema: z.array(port) }),
   descriptor('mark', { type: `${PACKAGE_NAME}/protocol#SerialMarkRequest`, schema: markRequest }, { type: `${PACKAGE_NAME}/protocol#SerialMarkerEvent`, schema: marker }),
   descriptor('send', { type: `${PACKAGE_NAME}/protocol#SerialSendRequest`, schema: sendRequest }, { type: `${PACKAGE_NAME}/protocol#SerialSendResult`, schema: sendResult }),
-  descriptor('snapshot', { type: `${PACKAGE_NAME}/protocol#SerialSnapshotRequest`, schema: snapshotRequest }, { type: `${PACKAGE_NAME}/protocol#SerialSnapshot`, schema: snapshot }),
+  descriptor('snapshot', { type: `${PACKAGE_NAME}/protocol#SerialSnapshotRequest`, schema: snapshotRequest }, { type: `${PACKAGE_NAME}/protocol#SerialSnapshot`, schema: snapshot }, true),
+  descriptor('waitSnapshot', { type: `${PACKAGE_NAME}/protocol#SerialWaitSnapshotRequest`, schema: waitSnapshotRequest }, { type: `${PACKAGE_NAME}/protocol#SerialSnapshot`, schema: snapshot }, true),
 ]
 
 export const TYPERT_REMOTE: TypertRemoteContribution = {

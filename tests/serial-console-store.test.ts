@@ -9,6 +9,7 @@ import type {
   SerialSendRequest,
   SerialSnapshot,
   SerialSnapshotRequest,
+  SerialWaitSnapshotRequest,
 } from '../src/protocol.js'
 import { SerialConsoleStore } from '../src/client/serial-console-store.js'
 
@@ -36,6 +37,10 @@ class FakeRemote implements SerialConsoleRemote {
     const result = this.snapshots.shift() ?? snapshot([], { nextSeq: this.nextSendSeq })
     this.nextSendSeq = Math.max(this.nextSendSeq, result.nextSeq)
     return result
+  }
+
+  async waitSnapshot(request: SerialWaitSnapshotRequest): Promise<SerialSnapshot> {
+    return await this.snapshot(request)
   }
 
   async send(request: SerialSendRequest): Promise<{ sessionId: string; seq: number; byteLength: number }> {

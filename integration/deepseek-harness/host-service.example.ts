@@ -20,6 +20,7 @@ import type {
   SerialSendResult,
   SerialSnapshot,
   SerialSnapshotRequest,
+  SerialWaitSnapshotRequest,
 } from '../../src/protocol.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -73,8 +74,17 @@ export class SerialConsoleService extends TypertRemoteService {
   }
 
   @Remote('snapshot')
-  snapshot(request: SerialSnapshotRequest): SerialSnapshot {
+  snapshot(request: SerialSnapshotRequest, signal?: AbortSignal): SerialSnapshot {
+    void signal
     return this.manager.snapshot(request.afterSeq ?? 0, request.limit)
+  }
+
+  @Remote('waitSnapshot')
+  async waitSnapshot(
+    request: SerialWaitSnapshotRequest,
+    signal: AbortSignal,
+  ): Promise<SerialSnapshot> {
+    return await this.manager.waitSnapshot(request, signal)
   }
 
   @Remote('send')
@@ -94,4 +104,3 @@ export class SerialConsoleService extends TypertRemoteService {
 }
 
 export default SerialConsoleService
-

@@ -38,6 +38,7 @@ describe('DSH installable bundle', () => {
       'mark',
       'send',
       'snapshot',
+      'waitSnapshot',
     ])
     expect(TYPERT.invocations).toBe(TYPERT_REMOTE.descriptors)
   })
