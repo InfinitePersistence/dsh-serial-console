@@ -101,6 +101,7 @@
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.1",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-serialize": "^0.14.0",
     "@xterm/xterm": "^6.0.0",
     "zod": "^4.4.3"
   },

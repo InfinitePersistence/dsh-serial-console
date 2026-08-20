@@ -1,9 +1,18 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { SerializeAddon } from '@xterm/addon-serialize'
 import { Terminal } from '@xterm/xterm'
 import type { IMarker, ITheme } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import type { SerialActor, SerialEvent } from '../protocol.js'
 import type { SerialLineEnding } from './serial-console-store.js'
+import {
+  takeRestorableTerminalCheckpoint,
+  saveTerminalCheckpoint,
+} from './terminal-checkpoint.js'
+import type {
+  TerminalCheckpoint,
+  TerminalCheckpointCache,
+} from './terminal-checkpoint.js'
 import {
   advanceTerminalTransmit,
   findTerminalSubmissionMatch,
@@ -40,8 +49,28 @@ interface PendingSubmission {
   readonly txSeq: number
 }
 
+interface CachedGutterRecord {
+  readonly line: number
+  readonly actor: GutterActor
+}
+
+export interface XtermTerminalCheckpointPayload {
+  readonly serializedTerminal: string
+  readonly bufferSignature: string
+  readonly records: readonly CachedGutterRecord[]
+  readonly txDrafts: Readonly<Record<SerialActor, string>>
+  readonly txOpaque: Readonly<Record<SerialActor, boolean>>
+  readonly pendingSubmissions: readonly PendingSubmission[]
+  readonly receiveTail: readonly ReceiveSpan[]
+}
+
 interface TerminalRuntime {
   readonly terminal: Terminal
+  readonly serializeAddon: SerializeAddon
+  readonly checkpointCache: TerminalCheckpointCache<XtermTerminalCheckpointPayload>
+  readonly checkpointKey: string
+  readonly checkpointBaseSeq: number
+  checkpointAllowed: boolean
   readonly records: GutterRecord[]
   readonly queue: SerialEvent[]
   readonly txDrafts: Record<SerialActor, string>
@@ -50,9 +79,15 @@ interface TerminalRuntime {
   draining: boolean
   disposed: boolean
   lastQueuedSeq: number
+  processedThroughSeq: number
   readonly receiveTail: ReceiveSpan[]
   readonly replayThroughSeq: number
+  readyToDrain: boolean
+  restoring: boolean
   processingRxSeq: number | undefined
+  checkpointTimer: ReturnType<typeof setTimeout> | undefined
+  revealFrame: number | undefined
+  completeInitialRestore: () => void
   gutterSignature: string
 }
 
@@ -63,6 +98,10 @@ export interface XtermSerialTerminalProps {
   readonly follow: boolean
   readonly lineEnding: SerialLineEnding
   readonly emptyLabel: string
+  readonly checkpointKey: string
+  readonly checkpointBaseSeq: number
+  readonly checkpointAllowed: boolean
+  readonly checkpointCache: TerminalCheckpointCache<XtermTerminalCheckpointPayload>
   readonly onTextInput: (text: string) => Promise<void>
   readonly onBinaryInput: (dataBase64: string) => Promise<void>
 }
@@ -77,6 +116,10 @@ export function XtermSerialTerminal({
   follow,
   lineEnding,
   emptyLabel,
+  checkpointKey,
+  checkpointBaseSeq,
+  checkpointAllowed,
+  checkpointCache,
   onTextInput,
   onBinaryInput,
 }: XtermSerialTerminalProps) {
@@ -87,7 +130,21 @@ export function XtermSerialTerminal({
   const lineEndingRef = useRef(lineEnding)
   const textInputRef = useRef(onTextInput)
   const binaryInputRef = useRef(onBinaryInput)
-  const replayThroughSeqRef = useRef(events.at(-1)?.seq ?? 0)
+  const eventsRef = useRef(events)
+  const replayThroughSeqRef = useRef(events.at(-1)?.seq ?? checkpointBaseSeq)
+  const checkpointCandidateRef = useRef<TerminalCheckpoint<XtermTerminalCheckpointPayload> | null>()
+  if (checkpointCandidateRef.current === undefined) {
+    checkpointCandidateRef.current = takeRestorableTerminalCheckpoint(checkpointCache, {
+      key: checkpointKey,
+      baseSeq: checkpointBaseSeq,
+      events,
+      allowRestore: checkpointAllowed,
+    }) ?? null
+  }
+  const checkpointCandidate = checkpointCandidateRef.current ?? null
+  const [restoring, setRestoring] = useState(
+    checkpointCandidate !== null || replayThroughSeqRef.current > checkpointBaseSeq,
+  )
   const [gutterRows, setGutterRows] = useState<readonly GutterRow[]>([])
 
   connectedRef.current = connected
@@ -95,28 +152,36 @@ export function XtermSerialTerminal({
   lineEndingRef.current = lineEnding
   textInputRef.current = onTextInput
   binaryInputRef.current = onBinaryInput
+  eventsRef.current = events
 
   useEffect(() => {
     const host = hostRef.current
     if (host === null) return
     const styles = getComputedStyle(host)
+    const checkpoint = checkpointCandidateRef.current ?? null
     const terminal = new Terminal({
       allowProposedApi: false,
       convertEol: false,
       cursorBlink: connectedRef.current,
-      disableStdin: !connectedRef.current,
+      disableStdin: true,
       drawBoldTextInBrightColors: true,
       fontFamily: styles.fontFamily,
       fontSize: Number.parseFloat(styles.fontSize),
       scrollback: 10_000,
       theme: terminalTheme(styles),
+      ...(checkpoint === null ? {} : { cols: checkpoint.cols, rows: checkpoint.rows }),
     })
     const fitAddon = new FitAddon()
+    const serializeAddon = new SerializeAddon()
     terminal.loadAddon(fitAddon)
-    terminal.open(host)
-    terminal.textarea?.setAttribute('aria-label', 'Serial terminal input')
+    terminal.loadAddon(serializeAddon)
     const runtime: TerminalRuntime = {
       terminal,
+      serializeAddon,
+      checkpointCache,
+      checkpointKey,
+      checkpointBaseSeq,
+      checkpointAllowed,
       records: [],
       queue: [],
       txDrafts: { model: '', user: '' },
@@ -124,17 +189,23 @@ export function XtermSerialTerminal({
       pendingSubmissions: [],
       draining: false,
       disposed: false,
-      lastQueuedSeq: 0,
+      lastQueuedSeq: checkpoint?.throughSeq ?? checkpointBaseSeq,
+      processedThroughSeq: checkpoint?.throughSeq ?? checkpointBaseSeq,
       receiveTail: [],
       replayThroughSeq: replayThroughSeqRef.current,
+      readyToDrain: false,
+      restoring: checkpoint !== null || replayThroughSeqRef.current > checkpointBaseSeq,
       processingRxSeq: undefined,
+      checkpointTimer: undefined,
+      revealFrame: undefined,
+      completeInitialRestore: () => undefined,
       gutterSignature: '',
     }
     runtimeRef.current = runtime
 
     const refresh = () => { refreshGutter(runtime, setGutterRows) }
     const dataDisposable = terminal.onData(data => {
-      if (!connectedRef.current || data.length === 0) return
+      if (runtime.restoring || !connectedRef.current || data.length === 0) return
       if (isReplayingTerminalEvent(runtime.replayThroughSeq, runtime.processingRxSeq)
         && isTerminalGeneratedReply(data)) return
       const outgoing = mapTerminalInput(data, lineEndingRef.current)
@@ -142,32 +213,106 @@ export function XtermSerialTerminal({
       void textInputRef.current(outgoing).catch(() => undefined)
     })
     const binaryDisposable = terminal.onBinary(data => {
-      if (!connectedRef.current || data.length === 0) return
+      if (runtime.restoring || !connectedRef.current || data.length === 0) return
       void binaryInputRef.current(globalThis.btoa(data)).catch(() => undefined)
     })
-    const renderDisposable = terminal.onRender(refresh)
-    const scrollDisposable = terminal.onScroll(refresh)
-    const resizeDisposable = terminal.onResize(refresh)
+    let renderDisposable: { dispose(): void } | undefined
+    let scrollDisposable: { dispose(): void } | undefined
+    let resizeDisposable: { dispose(): void } | undefined
+    let resizeObserver: ResizeObserver | undefined
+    let initialResizeFrame: number | undefined
     const resize = () => {
       if (runtime.disposed || host.clientWidth === 0 || host.clientHeight === 0) return
       fitAddon.fit()
       refresh()
+      scheduleCheckpoint(runtime)
     }
-    const resizeObserver = typeof ResizeObserver === 'undefined'
-      ? undefined
-      : new ResizeObserver(resize)
-    resizeObserver?.observe(host)
-    const animationFrame = requestAnimationFrame(resize)
+    const revealWhenCaughtUp = () => {
+      if (runtime.disposed
+        || !runtime.restoring
+        || !runtime.readyToDrain
+        || runtime.processedThroughSeq < runtime.replayThroughSeq
+        || runtime.revealFrame !== undefined) return
+      runtime.terminal.scrollToBottom()
+      runtime.revealFrame = requestAnimationFrame(() => {
+        runtime.revealFrame = undefined
+        if (runtime.disposed) return
+        runtime.restoring = false
+        runtime.terminal.options.disableStdin = !connectedRef.current
+        runtime.terminal.options.cursorBlink = connectedRef.current
+        if (connectedRef.current) runtime.terminal.focus()
+        refresh()
+        setRestoring(false)
+        scheduleCheckpoint(runtime)
+      })
+    }
+    runtime.completeInitialRestore = revealWhenCaughtUp
+    const openTerminal = () => {
+      if (runtime.disposed) return
+      terminal.open(host)
+      terminal.textarea?.setAttribute('aria-label', 'Serial terminal input')
+      renderDisposable = terminal.onRender(refresh)
+      scrollDisposable = terminal.onScroll(refresh)
+      resizeDisposable = terminal.onResize(refresh)
+      resizeObserver = typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(resize)
+      resizeObserver?.observe(host)
+      initialResizeFrame = requestAnimationFrame(resize)
+    }
+    const startDraining = () => {
+      runtime.readyToDrain = true
+      runtime.completeInitialRestore()
+      drainEvents(runtime, followRef, setGutterRows)
+    }
+    const replayWithoutCheckpoint = () => {
+      checkpointCache.current = undefined
+      terminal.reset()
+      resetCheckpointState(runtime)
+      const retained = eventsRef.current.filter(event => event.seq > checkpointBaseSeq)
+      runtime.queue.splice(0, runtime.queue.length, ...retained)
+      runtime.lastQueuedSeq = retained.at(-1)?.seq ?? checkpointBaseSeq
+      runtime.processedThroughSeq = checkpointBaseSeq
+      openTerminal()
+      startDraining()
+    }
+    const finishCheckpointRestore = () => {
+      if (runtime.disposed || checkpoint === null) return
+      if (terminalBufferSignature(terminal) !== checkpoint.payload.bufferSignature) {
+        replayWithoutCheckpoint()
+        return
+      }
+      restoreCheckpointState(runtime, checkpoint.payload, refresh)
+      openTerminal()
+      startDraining()
+    }
+
+    if (checkpoint === null) {
+      openTerminal()
+      startDraining()
+    } else {
+      try {
+        if (checkpoint.payload.serializedTerminal === '') finishCheckpointRestore()
+        else terminal.write(checkpoint.payload.serializedTerminal, finishCheckpointRestore)
+      } catch {
+        replayWithoutCheckpoint()
+      }
+    }
 
     return () => {
+      // A view switch unmounts this component. Capture the latest stable
+      // terminal before disposing xterm so the next mount does not replay it.
+      saveRuntimeCheckpoint(runtime)
       runtime.disposed = true
-      cancelAnimationFrame(animationFrame)
+      if (runtime.checkpointTimer !== undefined) clearTimeout(runtime.checkpointTimer)
+      if (runtime.revealFrame !== undefined) cancelAnimationFrame(runtime.revealFrame)
+      if (initialResizeFrame !== undefined) cancelAnimationFrame(initialResizeFrame)
       resizeObserver?.disconnect()
       dataDisposable.dispose()
       binaryDisposable.dispose()
-      renderDisposable.dispose()
-      scrollDisposable.dispose()
-      resizeDisposable.dispose()
+      renderDisposable?.dispose()
+      scrollDisposable?.dispose()
+      resizeDisposable?.dispose()
       for (const record of runtime.records) record.marker.dispose()
       terminal.dispose()
       if (runtimeRef.current === runtime) runtimeRef.current = undefined
@@ -177,10 +322,11 @@ export function XtermSerialTerminal({
   useEffect(() => {
     const runtime = runtimeRef.current
     if (runtime === undefined) return
-    runtime.terminal.options.disableStdin = !connected
+    runtime.terminal.options.disableStdin = runtime.restoring || !connected
     runtime.terminal.options.cursorBlink = connected
-    if (connected) runtime.terminal.focus()
-    else {
+    if (connected) {
+      if (!runtime.restoring) runtime.terminal.focus()
+    } else {
       runtime.receiveTail.splice(0)
       runtime.pendingSubmissions.splice(0)
       runtime.txDrafts.user = ''
@@ -189,6 +335,13 @@ export function XtermSerialTerminal({
       runtime.txOpaque.model = false
     }
   }, [connected])
+
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (runtime === undefined) return
+    runtime.checkpointAllowed = checkpointAllowed
+    if (!checkpointAllowed) checkpointCache.current = undefined
+  }, [checkpointAllowed, checkpointCache])
 
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -202,7 +355,12 @@ export function XtermSerialTerminal({
   }, [events])
 
   return (
-    <div className="dsh-serial-terminal-stage" role="application" aria-label="Serial VT terminal">
+    <div
+      className={`dsh-serial-terminal-stage${restoring ? ' is-restoring' : ''}`}
+      role="application"
+      aria-label="Serial VT terminal"
+      aria-busy={restoring}
+    >
       <div className="dsh-serial-gutter" aria-label="Terminal source markers">
         {gutterRows.map(row => (
           <span
@@ -216,7 +374,8 @@ export function XtermSerialTerminal({
         ))}
       </div>
       <div ref={hostRef} className="dsh-serial-xterm-host" />
-      {events.length === 0 && <div className="dsh-serial-terminal-hint">{emptyLabel}</div>}
+      {restoring && <div className="dsh-serial-terminal-restoring">Restoring terminal…</div>}
+      {!restoring && events.length === 0 && <div className="dsh-serial-terminal-hint">{emptyLabel}</div>}
     </div>
   )
 }
@@ -226,9 +385,13 @@ function drainEvents(
   followRef: { readonly current: boolean },
   setRows: (rows: readonly GutterRow[]) => void,
 ): void {
-  if (runtime.draining || runtime.disposed) return
+  if (!runtime.readyToDrain || runtime.draining || runtime.disposed) return
   const event = runtime.queue.shift()
-  if (event === undefined) return
+  if (event === undefined) {
+    runtime.completeInitialRestore()
+    scheduleCheckpoint(runtime)
+    return
+  }
   runtime.draining = true
   const refresh = () => { refreshGutter(runtime, setRows) }
   if (event.type === 'rx') {
@@ -252,6 +415,8 @@ function drainEvents(
         if (followRef.current) runtime.terminal.scrollToBottom()
       }
       runtime.draining = false
+      runtime.processedThroughSeq = event.seq
+      runtime.completeInitialRestore()
       drainEvents(runtime, followRef, setRows)
     })
     return
@@ -262,7 +427,104 @@ function drainEvents(
     markLine(runtime, currentLine(runtime.terminal), 'system', refresh)
   }
   runtime.draining = false
+  runtime.processedThroughSeq = event.seq
+  runtime.completeInitialRestore()
   drainEvents(runtime, followRef, setRows)
+}
+
+const CHECKPOINT_DELAY_MS = 500
+const CHECKPOINT_SCROLLBACK_ROWS = 10_000
+const CHECKPOINT_SIGNATURE_ROWS = 8
+
+function scheduleCheckpoint(runtime: TerminalRuntime): void {
+  if (runtime.disposed || runtime.restoring || !runtime.checkpointAllowed) return
+  if (runtime.checkpointTimer !== undefined) clearTimeout(runtime.checkpointTimer)
+  runtime.checkpointTimer = setTimeout(() => {
+    runtime.checkpointTimer = undefined
+    saveRuntimeCheckpoint(runtime)
+  }, CHECKPOINT_DELAY_MS)
+}
+
+function saveRuntimeCheckpoint(runtime: TerminalRuntime): void {
+  if (runtime.disposed
+    || runtime.restoring
+    || runtime.draining
+    || runtime.queue.length !== 0
+    || runtime.processingRxSeq !== undefined
+    || !runtime.checkpointAllowed
+    || runtime.terminal.buffer.active.type !== 'normal') return
+  const existing = runtime.checkpointCache.current
+  if (existing?.key === runtime.checkpointKey
+    && existing.baseSeq === runtime.checkpointBaseSeq
+    && existing.throughSeq === runtime.processedThroughSeq
+    && existing.cols === runtime.terminal.cols
+    && existing.rows === runtime.terminal.rows) return
+  let serializedTerminal: string
+  try {
+    serializedTerminal = runtime.serializeAddon.serialize({ scrollback: CHECKPOINT_SCROLLBACK_ROWS })
+  } catch {
+    return
+  }
+  saveTerminalCheckpoint(runtime.checkpointCache, {
+    key: runtime.checkpointKey,
+    baseSeq: runtime.checkpointBaseSeq,
+    throughSeq: runtime.processedThroughSeq,
+    cols: runtime.terminal.cols,
+    rows: runtime.terminal.rows,
+    payload: {
+      serializedTerminal,
+      bufferSignature: terminalBufferSignature(runtime.terminal),
+      records: runtime.records
+        .filter(record => !record.marker.isDisposed)
+        .map(record => ({ line: record.marker.line, actor: record.actor })),
+      txDrafts: { ...runtime.txDrafts },
+      txOpaque: { ...runtime.txOpaque },
+      pendingSubmissions: runtime.pendingSubmissions.map(pending => ({ ...pending })),
+      receiveTail: runtime.receiveTail.map(span => ({ ...span })),
+    },
+  })
+}
+
+function restoreCheckpointState(
+  runtime: TerminalRuntime,
+  checkpoint: XtermTerminalCheckpointPayload,
+  refresh: () => void,
+): void {
+  runtime.txDrafts.user = checkpoint.txDrafts.user
+  runtime.txDrafts.model = checkpoint.txDrafts.model
+  runtime.txOpaque.user = checkpoint.txOpaque.user
+  runtime.txOpaque.model = checkpoint.txOpaque.model
+  runtime.pendingSubmissions.splice(
+    0,
+    runtime.pendingSubmissions.length,
+    ...checkpoint.pendingSubmissions.map(pending => ({ ...pending })),
+  )
+  runtime.receiveTail.splice(
+    0,
+    runtime.receiveTail.length,
+    ...checkpoint.receiveTail.map(span => ({ ...span })),
+  )
+  for (const cached of checkpoint.records) {
+    const marker = runtime.terminal.registerMarker(cached.line - currentLine(runtime.terminal)) as IMarker | undefined
+    if (marker === undefined) continue
+    const record: GutterRecord = { marker, actor: cached.actor }
+    runtime.records.push(record)
+    marker.onDispose(refresh)
+  }
+}
+
+function resetCheckpointState(runtime: TerminalRuntime): void {
+  for (const record of runtime.records) record.marker.dispose()
+  runtime.records.splice(0)
+  runtime.queue.splice(0)
+  runtime.txDrafts.user = ''
+  runtime.txDrafts.model = ''
+  runtime.txOpaque.user = false
+  runtime.txOpaque.model = false
+  runtime.pendingSubmissions.splice(0)
+  runtime.receiveTail.splice(0)
+  runtime.processingRxSeq = undefined
+  runtime.gutterSignature = ''
 }
 
 function markReceiveSpan(
@@ -429,6 +691,25 @@ function hasCommandAttribution(runtime: TerminalRuntime, line: number): boolean 
 function activeLineText(terminal: Terminal): string | undefined {
   const text = terminal.buffer.active.getLine(currentLine(terminal))?.translateToString(true).trimEnd() ?? ''
   return text === '' ? undefined : text
+}
+
+function terminalBufferSignature(terminal: Terminal): string {
+  const buffer = terminal.buffer.active
+  const start = Math.max(0, buffer.length - CHECKPOINT_SIGNATURE_ROWS)
+  const lines = []
+  for (let line = start; line < buffer.length; line += 1) {
+    const current = buffer.getLine(line)
+    lines.push(`${current?.isWrapped === true ? 'w' : 'n'}:${current?.translateToString(false) ?? ''}`)
+  }
+  return JSON.stringify({
+    type: buffer.type,
+    cols: terminal.cols,
+    rows: terminal.rows,
+    baseY: buffer.baseY,
+    cursorX: buffer.cursorX,
+    cursorY: buffer.cursorY,
+    lines,
+  })
 }
 
 function markLine(

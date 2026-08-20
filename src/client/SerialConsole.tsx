@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { SerialEvent } from '../protocol.js'
 import type { SerialConsoleStore, SerialLineEnding } from './serial-console-store.js'
 import { XtermSerialTerminal } from './XtermSerialTerminal.js'
+import type { XtermTerminalCheckpointPayload } from './XtermSerialTerminal.js'
+import { createTerminalCheckpointCache } from './terminal-checkpoint.js'
+import type { TerminalCheckpointCache } from './terminal-checkpoint.js'
 import './serial-console.css'
 
 /** Props for the standalone serial-console surface. */
@@ -9,12 +12,20 @@ export interface SerialConsoleProps {
   readonly store: SerialConsoleStore
 }
 
+interface SerialConsoleUiMemory {
+  hiddenBeforeSeq: number
+  readonly checkpointCache: TerminalCheckpointCache<XtermTerminalCheckpointPayload>
+}
+
+const UI_MEMORY = new WeakMap<SerialConsoleStore, SerialConsoleUiMemory>()
+
 /** Standalone serial console combining xterm with Host connection controls. */
 export function SerialConsole({ store }: SerialConsoleProps) {
+  const uiMemory = useMemo(() => memoryFor(store), [store])
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const [mode, setMode] = useState<'text' | 'hex'>('text')
   const [follow, setFollow] = useState(true)
-  const [hiddenBeforeSeq, setHiddenBeforeSeq] = useState(0)
+  const [hiddenBeforeSeq, setHiddenBeforeSeq] = useState(uiMemory.hiddenBeforeSeq)
 
   useEffect(() => {
     const stop = store.start()
@@ -33,6 +44,7 @@ export function SerialConsole({ store }: SerialConsoleProps) {
     || (synchronizationStopped && state.remote.status !== 'disconnected')
   const terminalInputEnabled = connected && !synchronizationStopped
   const synchronizationError = state.syncFault ?? state.syncError
+  const checkpointKey = `${state.remote.sessionId ?? 'disconnected'}:${hiddenBeforeSeq}`
 
   const toggleConnection = async () => {
     if (disconnectAvailable) {
@@ -98,7 +110,12 @@ export function SerialConsole({ store }: SerialConsoleProps) {
         </button>
         <button
           type="button"
-          onClick={() => { setHiddenBeforeSeq(state.events.at(-1)?.seq ?? hiddenBeforeSeq) }}
+          onClick={() => {
+            const next = state.events.at(-1)?.seq ?? hiddenBeforeSeq
+            uiMemory.hiddenBeforeSeq = next
+            uiMemory.checkpointCache.current = undefined
+            setHiddenBeforeSeq(next)
+          }}
           title="Only clears this terminal; Host audit logs are retained"
         >
           Clear view
@@ -114,11 +131,15 @@ export function SerialConsole({ store }: SerialConsoleProps) {
 
       {mode === 'text' ? (
         <XtermSerialTerminal
-          key={`${state.remote.sessionId ?? 'disconnected'}:${hiddenBeforeSeq}`}
+          key={checkpointKey}
           events={visibleEvents}
           connected={terminalInputEnabled}
           follow={follow}
           lineEnding={state.lineEnding}
+          checkpointKey={checkpointKey}
+          checkpointBaseSeq={hiddenBeforeSeq}
+          checkpointAllowed={!state.gapDetected}
+          checkpointCache={uiMemory.checkpointCache}
           emptyLabel={synchronizationStopped
             ? 'Serial synchronization stopped. Disconnect or reload the Remote plugin to recover.'
             : connected
@@ -134,6 +155,17 @@ export function SerialConsole({ store }: SerialConsoleProps) {
       )}
     </section>
   )
+}
+
+function memoryFor(store: SerialConsoleStore): SerialConsoleUiMemory {
+  const existing = UI_MEMORY.get(store)
+  if (existing !== undefined) return existing
+  const created: SerialConsoleUiMemory = {
+    hiddenBeforeSeq: 0,
+    checkpointCache: createTerminalCheckpointCache<XtermTerminalCheckpointPayload>(),
+  }
+  UI_MEMORY.set(store, created)
+  return created
 }
 
 function HexRow({ event }: { event: SerialEvent }) {

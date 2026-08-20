@@ -128,6 +128,21 @@
   font: 12px/1.4 system-ui, sans-serif;
 }
 
+.dsh-serial-terminal-stage.is-restoring .dsh-serial-gutter,
+.dsh-serial-terminal-stage.is-restoring .dsh-serial-xterm-host {
+  visibility: hidden;
+}
+
+.dsh-serial-terminal-restoring {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 42px;
+  color: #8997a8;
+  pointer-events: none;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+
 .dsh-serial-hex-log {
   flex: 1 1 0;
   min-width: 0;

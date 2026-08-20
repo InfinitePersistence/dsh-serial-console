@@ -18,8 +18,8 @@ export default defineConfig({
   clean: false,
   deps: {
     neverBundle: ['react', 'react/jsx-runtime', '@deepseek-ai/cordis'],
-    alwaysBundle: ['@xterm/addon-fit', '@xterm/xterm', 'zod'],
-    onlyBundle: ['@xterm/addon-fit', '@xterm/xterm', 'zod'],
+    alwaysBundle: ['@xterm/addon-fit', '@xterm/addon-serialize', '@xterm/xterm', 'zod'],
+    onlyBundle: ['@xterm/addon-fit', '@xterm/addon-serialize', '@xterm/xterm', 'zod'],
   },
   plugins: [{
     name: 'dsh-serial-inline-css',
