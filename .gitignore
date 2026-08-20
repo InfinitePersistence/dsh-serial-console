@@ -3,6 +3,21 @@ node_modules/
 dist/
 coverage/
 *.log
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+.npmrc
+
+# Local agent instructions and generated artifacts
+AGENTS.md
+*.tgz
+*.tsbuildinfo
+
+# Operating-system and editor metadata
 .DS_Store
+Thumbs.db
+Desktop.ini
 .idea/
 .vscode/
