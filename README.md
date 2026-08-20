@@ -81,29 +81,73 @@ Text 模式提供真实的 VT 终端交互。板卡返回的提示符、ANSI 颜
 ### 环境要求
 
 - Node.js `^22.19.0` 或 `>=24.0.0`
-- pnpm 11
+- DeepSeek Harness `0.1.0-rc.7`
+- pnpm `11.22.0`
 - Windows 或 Linux 串口环境
 
-### 从 npm 安装
+### 已有 DSH：一行安装并启用
 
-项目已发布到 [`@infinitepersistence/dsh-serial-console`](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)。如果你已经有名为 `web` 的 DSH profile，一条命令即可安装并启用 Host、网页串口页和模型工具：
+项目发布在 [`@infinitepersistence/dsh-serial-console`](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)。已经安装 DSH `0.1.0-rc.7` 的用户，可以用一条命令将插件安装到 `web` profile，并同时启用 Host、网页串口页和模型工具：
 
-```bash
-dsh plugin --profile web add @infinitepersistence/dsh-serial-console@next
+```powershell
+dsh.cmd plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.1' --save-exact
 ```
 
-然后照常启动 Web profile：
+停止仍在运行的旧 Host 后，启动同一个 profile：
 
-```bash
-dsh web
+```powershell
+dsh.cmd --profile web
 ```
 
-`dsh plugin add` 与普通 `npm install`/`pnpm add` 不同：它会读取包内的 `dsh.bundle` 清单，把插件 patch 加入指定 profile，并在下次启动时自动挂载。插件已经携带 serialport 的官方多平台预编译二进制，不需要额外批准原生构建脚本。
+`dsh.cmd web` 与 `dsh.cmd --profile web` 等价。安装和启动必须使用同一个 profile；升级后请重启 Host，并在浏览器中使用 `Ctrl+F5` 刷新页面。
+
+### 全新 Windows：安装环境、DSH 与插件
+
+在 PowerShell 中依次执行：
+
+```powershell
+# 基础环境
+winget install --id Git.Git --exact --source winget --accept-package-agreements --accept-source-agreements
+winget install --id OpenJS.NodeJS.LTS --exact --source winget --accept-package-agreements --accept-source-agreements
+winget install --id Microsoft.VCRedist.2015+.x64 --exact --source winget --accept-package-agreements --accept-source-agreements
+
+# 让当前 PowerShell 识别新安装的软件
+$machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$env:Path = "$machinePath;$userPath"
+
+# 安装经过验证的 pnpm 与 DSH 版本
+& npm.cmd install --global pnpm@11.22.0 '@deepseek-ai/dsh@0.1.0-rc.7'
+
+# 定位全局 dsh 命令
+$npmGlobal = (& npm.cmd prefix --global).Trim()
+$dsh = Join-Path $npmGlobal 'dsh.cmd'
+$env:Path = "$npmGlobal;$env:Path"
+
+# 安装并启用串口插件
+& $dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.1' --save-exact
+
+# 启动 DSH Web
+& $dsh --profile web
+```
+
+启动后访问 `http://127.0.0.1:3080`，进入任意对话并选择“串口”标签。`dsh plugin add` 与普通 `npm install`/`pnpm add` 不同：它会读取包内的 bundle 清单，将插件 patch 加入指定 profile，并在下次启动时自动挂载。插件携带 serialport 的官方多平台预编译二进制，无需从源码构建。
+
+### Linux 与 macOS
+
+确认 Node.js 与 DSH 版本满足上面的要求后执行：
+
+```bash
+dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.1' --save-exact
+dsh --profile web
+```
+
+### 作为程序库安装
 
 如果只是把控制台作为 React/Node.js 库嵌入自己的程序，可以使用：
 
 ```bash
-pnpm add @infinitepersistence/dsh-serial-console@next
+pnpm add '@infinitepersistence/dsh-serial-console@0.1.0-rc.1' --save-exact
 ```
 
 包提供以下公开入口：
@@ -129,7 +173,7 @@ pnpm build
 
 ## 当前状态
 
-项目目前处于 `0.1.0-alpha` 阶段，主要能力已经具备，但仍建议在非关键设备上验证后再用于生产调试。
+项目目前处于 `0.1.0-rc.1` 候选阶段。`0.1.0` 功能范围已经冻结，在稳定版发布前只接受缺陷修复、兼容性改进和文档完善；可选 AI 输出浏览窗不属于 `0.1.0` 范围。
 
 当前限制：
 
