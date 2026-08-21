@@ -16,6 +16,8 @@ flowchart LR
     SM --> JL[Append-only JSONL audit]
     RB --> CR
     CR --> VW[Serial Console view]
+    CS[Current DSH conversation snapshot] --> AV[Read-only AI activity panel]
+    AV --> VW
 ```
 
 Host 是唯一物理串口所有者。模型工具调用同进程 service；Web Client 经 Remote 调用连接、发送和增量快照。所有 RX、TX、状态、错误和 marker 进入同一带序号事件流。
@@ -37,6 +39,8 @@ Host 是唯一物理串口所有者。模型工具调用同进程 service；Web 
 ### Client store and view
 
 `SerialConsoleStore` 依赖 `SerialConsoleRemote` 接口，不依赖 Harness Context。DSH Client 插件只负责把生成的 `ctx.remote.serialConsole` 适配成这个接口并注册 UI slot。Store 保留连接选择、增量事件窗口和单一写 FIFO，不解析 readline 或维护浏览器草稿。
+
+DSH 适配层同时使用 `conversation.view` 的公开 session standard kit，把当前会话的流式 assistant、运行中工具、最终回复和错误折叠成只读 AI 活动快照。该浏览窗不复制会话输入、审批或完整 Chat renderer，也不增加 Host/Remote 接口；独立 React 控制台未提供 `useConversation` 时仍只渲染串口。面板宽度和开关只保存为浏览器本地偏好，不持久化任何会话正文。
 
 `XtermSerialTerminal` 是 Text 模式唯一的屏幕与输入面。RX 的 Base64 原始字节作为 `Uint8Array` 写入 xterm；TX 不写入屏幕，避免板端回显与浏览器本地回显重复。Tab、Backspace、方向键、粘贴、IME 和控制序列按 xterm 产生的字节发送，补全和光标位置由板端 readline 与 VT 回显决定。
 
@@ -87,12 +91,7 @@ xterm 选区主题同时设置 `selectionBackground` 与 `selectionForeground`�
 
 当前 Harness 的顶层 `details` 是 single slot，`ui-conversation` 已注册 DetailsPanel，并在内部声明 `conversation.details.tool`。第三方插件注册顶层 `details` 会替换现有详情栏，不能作为社区插件默认行为。
 
-采用两阶段方案：
-
-1. v0.1：注册 additive `conversation.view`，提供 `Serial` 标签页，最容易随插件加载和卸载。
-2. v0.2：注册 additive `shell.overlay`，实现右侧浮动/可缩放抽屉；通过 `sidebar.footer.action` 和串口工具卡控制开关。
-
-如果未来上游提供 additive details region，再迁移到官方扩展点。
+v0.1 注册 additive `conversation.view`，提供 `Serial` 标签页，并在标签页内部加入可折叠、可缩放的只读 AI 浏览窗。它直接消费该 slot 已注入的当前会话快照，因此不占用顶层 `details`，也不依赖尚未稳定的 shell overlay 扩展点。未来如果上游提供 additive details region，可把同一浏览组件迁入官方区域，而不改变串口数据链路。
 
 ## Remote 与实时性
 

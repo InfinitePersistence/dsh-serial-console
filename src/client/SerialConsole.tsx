@@ -1,5 +1,14 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import type { SerialEvent } from '../protocol.js'
+import { AiActivityPanel } from './AiActivityPanel.js'
+import { deriveAiActivity } from './ai-activity.js'
+import type { AiActivitySnapshot, SerialConversationSnapshot, UseSerialConversation } from './ai-activity.js'
+import {
+  clampAiPanelWidth,
+  loadAiPanelPreferences,
+  saveAiPanelPreferences,
+} from './ai-panel-preferences.js'
 import type { SerialConsoleStore, SerialLineEnding } from './serial-console-store.js'
 import { XtermSerialTerminal } from './XtermSerialTerminal.js'
 import type { XtermTerminalCheckpointPayload } from './XtermSerialTerminal.js'
@@ -10,6 +19,8 @@ import './serial-console.css'
 /** Props for the standalone serial-console surface. */
 export interface SerialConsoleProps {
   readonly store: SerialConsoleStore
+  /** DSH session selector hook; omitted when embedding the standalone React surface. */
+  readonly useConversation?: UseSerialConversation
 }
 
 interface SerialConsoleUiMemory {
@@ -20,18 +31,61 @@ interface SerialConsoleUiMemory {
 const UI_MEMORY = new WeakMap<SerialConsoleStore, SerialConsoleUiMemory>()
 
 /** Standalone serial console combining xterm with Host connection controls. */
-export function SerialConsole({ store }: SerialConsoleProps) {
+export function SerialConsole({ store, useConversation }: SerialConsoleProps) {
+  if (useConversation === undefined) return <SerialConsoleSurface store={store} />
+  return <ConversationAwareSerialConsole store={store} useConversation={useConversation} />
+}
+
+function ConversationAwareSerialConsole({
+  store,
+  useConversation,
+}: Required<SerialConsoleProps>) {
+  const conversation = useConversation(selectConversation)
+  const activity = useMemo(() => deriveAiActivity(conversation), [conversation])
+  return <SerialConsoleSurface store={store} aiActivity={activity} />
+}
+
+function selectConversation(snapshot: SerialConversationSnapshot): SerialConversationSnapshot {
+  return snapshot
+}
+
+function SerialConsoleSurface({
+  store,
+  aiActivity,
+}: {
+  readonly store: SerialConsoleStore
+  readonly aiActivity?: AiActivitySnapshot
+}) {
   const uiMemory = useMemo(() => memoryFor(store), [store])
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const [mode, setMode] = useState<'text' | 'hex'>('text')
   const [follow, setFollow] = useState(true)
   const [hiddenBeforeSeq, setHiddenBeforeSeq] = useState(uiMemory.hiddenBeforeSeq)
+  const [aiPanel, setAiPanel] = useState(loadAiPanelPreferences)
+  const [aiUnread, setAiUnread] = useState(false)
+  const workbenchRef = useRef<HTMLDivElement>(null)
+  const panelWidthRef = useRef(aiPanel.width)
+  const dragRef = useRef<{ readonly pointerId: number; readonly startX: number; readonly startWidth: number }>()
+  const pendingWidthRef = useRef<number>()
+  const resizeFrameRef = useRef<number>()
+  const activitySignatureRef = useRef(aiActivity?.signature)
 
   useEffect(() => {
     const stop = store.start()
     void store.loadPorts()
     return stop
   }, [store])
+
+  useEffect(() => () => {
+    if (resizeFrameRef.current !== undefined) cancelAnimationFrame(resizeFrameRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (aiActivity === undefined || aiActivity.signature === activitySignatureRef.current) return
+    activitySignatureRef.current = aiActivity.signature
+    if (aiPanel.open) setAiUnread(false)
+    else if (aiActivity.status !== 'idle') setAiUnread(true)
+  }, [aiActivity, aiPanel.open])
 
   const visibleEvents = useMemo(
     () => state.events.filter(event => event.seq > hiddenBeforeSeq).slice(-2_000),
@@ -55,6 +109,95 @@ export function SerialConsole({ store }: SerialConsoleProps) {
     if (state.selectedPath === '' || !Number.isSafeInteger(parsedBaud) || parsedBaud < 1) return
     await store.connect({ path: state.selectedPath, baudRate: parsedBaud })
   }
+
+  const setAiPanelOpen = (open: boolean) => {
+    const next = { ...aiPanel, open }
+    setAiPanel(next)
+    saveAiPanelPreferences(next)
+    if (open) setAiUnread(false)
+  }
+
+  const commitPanelWidth = (width: number) => {
+    const next = { ...aiPanel, width: clampAiPanelWidth(width) }
+    panelWidthRef.current = next.width
+    setAiPanel(next)
+    saveAiPanelPreferences(next)
+  }
+
+  const schedulePanelWidth = (width: number) => {
+    const next = clampAiPanelWidth(width)
+    pendingWidthRef.current = next
+    panelWidthRef.current = next
+    if (resizeFrameRef.current !== undefined) return
+    resizeFrameRef.current = requestAnimationFrame(() => {
+      resizeFrameRef.current = undefined
+      const pending = pendingWidthRef.current
+      if (pending !== undefined) {
+        workbenchRef.current?.style.setProperty('--dsh-serial-ai-width', `${pending}px`)
+      }
+    })
+  }
+
+  const beginPanelResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: panelWidthRef.current,
+    }
+  }
+
+  const resizePanel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (drag === undefined || drag.pointerId !== event.pointerId) return
+    schedulePanelWidth(drag.startWidth + drag.startX - event.clientX)
+  }
+
+  const finishPanelResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (drag === undefined || drag.pointerId !== event.pointerId) return
+    dragRef.current = undefined
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    commitPanelWidth(pendingWidthRef.current ?? panelWidthRef.current)
+    pendingWidthRef.current = undefined
+  }
+
+  const resizePanelByKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    commitPanelWidth(panelWidthRef.current + (event.key === 'ArrowLeft' ? 16 : -16))
+  }
+
+  const workbenchStyle = {
+    '--dsh-serial-ai-width': `${aiPanel.width}px`,
+  } as CSSProperties
+
+  const terminal = mode === 'text' ? (
+    <XtermSerialTerminal
+      key={checkpointKey}
+      events={visibleEvents}
+      connected={terminalInputEnabled}
+      follow={follow}
+      lineEnding={state.lineEnding}
+      checkpointKey={checkpointKey}
+      checkpointBaseSeq={hiddenBeforeSeq}
+      checkpointAllowed={!state.gapDetected}
+      checkpointCache={uiMemory.checkpointCache}
+      emptyLabel={synchronizationStopped
+        ? 'Serial synchronization stopped. Disconnect or reload the Remote plugin to recover.'
+        : connected
+          ? 'Connected: Tab, arrows, paste, and terminal controls are sent directly to the board.'
+          : 'Select a serial port and baud rate, then connect.'}
+      onTextInput={text => store.sendTerminalText(text)}
+      onBinaryInput={dataBase64 => store.sendTerminalBinary(dataBase64)}
+    />
+  ) : (
+    <div className="dsh-serial-hex-log" role="log" aria-label="Raw serial byte events">
+      {visibleEvents.map(event => <HexRow key={`${event.sessionId}:${event.seq}`} event={event} />)}
+    </div>
+  )
 
   return (
     <section className="dsh-serial-console" aria-label="Serial Console">
@@ -121,6 +264,18 @@ export function SerialConsole({ store }: SerialConsoleProps) {
           Clear view
         </button>
         <button type="button" onClick={() => { downloadEvents(state.events) }}>Export</button>
+        {aiActivity !== undefined && (
+          <button
+            type="button"
+            className="dsh-serial-ai-toggle"
+            onClick={() => { setAiPanelOpen(!aiPanel.open) }}
+            aria-expanded={aiPanel.open}
+            aria-controls="dsh-serial-ai-panel"
+          >
+            AI {aiPanel.open ? '✓' : '–'}
+            {aiUnread && <span className="dsh-serial-ai-unread" aria-label="New AI activity" />}
+          </button>
+        )}
       </header>
 
       {state.gapDetected && (
@@ -129,30 +284,35 @@ export function SerialConsole({ store }: SerialConsoleProps) {
       {synchronizationError !== undefined && <div className="dsh-serial-error">{synchronizationError}</div>}
       {state.lastError !== undefined && <div className="dsh-serial-error">{state.lastError}</div>}
 
-      {mode === 'text' ? (
-        <XtermSerialTerminal
-          key={checkpointKey}
-          events={visibleEvents}
-          connected={terminalInputEnabled}
-          follow={follow}
-          lineEnding={state.lineEnding}
-          checkpointKey={checkpointKey}
-          checkpointBaseSeq={hiddenBeforeSeq}
-          checkpointAllowed={!state.gapDetected}
-          checkpointCache={uiMemory.checkpointCache}
-          emptyLabel={synchronizationStopped
-            ? 'Serial synchronization stopped. Disconnect or reload the Remote plugin to recover.'
-            : connected
-              ? 'Connected: Tab, arrows, paste, and terminal controls are sent directly to the board.'
-            : 'Select a serial port and baud rate, then connect.'}
-          onTextInput={text => store.sendTerminalText(text)}
-          onBinaryInput={dataBase64 => store.sendTerminalBinary(dataBase64)}
-        />
-      ) : (
-        <div className="dsh-serial-hex-log" role="log" aria-label="Raw serial byte events">
-          {visibleEvents.map(event => <HexRow key={`${event.sessionId}:${event.seq}`} event={event} />)}
-        </div>
-      )}
+      <div
+        ref={workbenchRef}
+        className={`dsh-serial-workbench${aiPanel.open && aiActivity !== undefined ? ' is-ai-open' : ''}`}
+        style={workbenchStyle}
+      >
+        <div className="dsh-serial-terminal-pane">{terminal}</div>
+        {aiPanel.open && aiActivity !== undefined && (
+          <>
+            <div
+              className="dsh-serial-ai-resizer"
+              role="separator"
+              aria-label="Resize AI activity panel"
+              aria-orientation="vertical"
+              aria-valuemin={300}
+              aria-valuemax={600}
+              aria-valuenow={aiPanel.width}
+              tabIndex={0}
+              onPointerDown={beginPanelResize}
+              onPointerMove={resizePanel}
+              onPointerUp={finishPanelResize}
+              onPointerCancel={finishPanelResize}
+              onKeyDown={resizePanelByKeyboard}
+            />
+            <div id="dsh-serial-ai-panel" className="dsh-serial-ai-panel-seat">
+              <AiActivityPanel activity={aiActivity} onClose={() => { setAiPanelOpen(false) }} />
+            </div>
+          </>
+        )}
+      </div>
     </section>
   )
 }

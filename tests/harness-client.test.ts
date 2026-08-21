@@ -3,6 +3,7 @@ import type { ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import { apply } from '../src/harness/client.js'
 import type { SerialConsoleStore } from '../src/client/serial-console-store.js'
+import type { SerialConversationSnapshot, UseSerialConversation } from '../src/client/ai-activity.js'
 import type {
   SerialConsoleRemote,
   SerialSnapshot,
@@ -62,7 +63,10 @@ describe('Harness client adapter', () => {
 })
 
 async function mountedStore(snapshotInvocation: SnapshotInvocation): Promise<SerialConsoleStore> {
-  let view: (() => ReactElement<{ store: SerialConsoleStore }>) | undefined
+  let view: ((props: { readonly useSession: UseSerialConversation }) => ReactElement<{
+    store: SerialConsoleStore
+    useConversation: UseSerialConversation
+  }>) | undefined
   const empty = immediateSnapshot()
   const api = {
     listPorts: async () => ({ ok: true, value: [] } as const),
@@ -98,7 +102,7 @@ async function mountedStore(snapshotInvocation: SnapshotInvocation): Promise<Ser
     effect: () => undefined,
     slots: {
       inject: (_name: string, register: () => unknown) => register(),
-      register: (_definition: unknown, component: () => ReactElement<{ store: SerialConsoleStore }>) => {
+      register: (_definition: unknown, component: typeof view) => {
         view = component
         return undefined
       },
@@ -107,7 +111,22 @@ async function mountedStore(snapshotInvocation: SnapshotInvocation): Promise<Ser
 
   await apply(ctx as unknown as Context)
   if (view === undefined) throw new Error('serial view was not registered')
-  return view().props.store
+  const useSession: UseSerialConversation = selector => selector(emptyConversation())
+  const element = view({ useSession })
+  if (element.props.useConversation !== useSession) {
+    throw new Error('serial view did not receive the DSH conversation selector')
+  }
+  return element.props.store
+}
+
+function emptyConversation(): SerialConversationSnapshot {
+  return {
+    running: false,
+    partial: null,
+    nodes: [],
+    runningCalls: [],
+    lastAgentError: null,
+  }
 }
 
 function immediateSnapshot(): SerialSnapshot {

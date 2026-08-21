@@ -1,6 +1,7 @@
 /** Combined browser plugin: mount Remote descriptors and register the Serial tab. */
 import type { Context } from '@deepseek-ai/cordis'
 import { SerialConsole } from '../client/SerialConsole.js'
+import type { UseSerialConversation } from '../client/ai-activity.js'
 import { SerialConsoleStore } from '../client/serial-console-store.js'
 import { SerialRemoteError } from '../protocol.js'
 import type {
@@ -44,9 +45,13 @@ interface ClientContext extends Context {
     inject(name: 'conversation.view', register: () => unknown): unknown
     register(
       definition: { readonly name: 'conversation.view'; readonly id: string; readonly order: number; readonly label: string },
-      component: () => React.JSX.Element,
+      component: (props: SerialConversationViewProps) => React.JSX.Element,
     ): unknown
   }
+}
+
+interface SerialConversationViewProps {
+  readonly useSession: UseSerialConversation
 }
 
 export const inject = ['slots', 'remote']
@@ -94,7 +99,7 @@ export async function apply(baseContext: Context): Promise<void> {
     id: 'serial-console',
     order: 20,
     label: '串口',
-  }, () => <SerialConsole store={store} />))
+  }, ({ useSession }) => <SerialConsole store={store} useConversation={useSession} />))
 }
 
 function unwrap<T>(result: RemoteResult<T>): T {
