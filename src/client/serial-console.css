@@ -126,6 +126,34 @@
 }
 
 .dsh-serial-ai-panel {
+  /* The serial workbench is intentionally dark even when DSH uses its light
+     theme. Keep the native Markdown renderer on a matching scoped palette so
+     its explicit design tokens do not turn the text dark on this surface. */
+  --dsw-alias-bg-base: #101720;
+  --dsw-alias-border-l1: rgb(255 255 255 / 6%);
+  --dsw-alias-border-l2: #293442;
+  --dsw-alias-border-l3: #344251;
+  --dsw-alias-interactive-bg-hover: rgb(255 255 255 / 8%);
+  --dsw-alias-label-caption: #687482;
+  --dsw-alias-label-primary: var(--serial-fg);
+  --dsw-alias-label-secondary: #a8b6c6;
+  --dsw-alias-label-tertiary: #8997a8;
+  --dsw-alias-markdown-code-block: #080d12;
+  --dsw-alias-markdown-code-block-banner: #141b23;
+  --dsw-alias-markdown-inline-code: #1b2632;
+  --dsw-alias-state-business-primary: #70b8ff;
+  --shiki-foreground: var(--serial-fg);
+  --shiki-background: #080d12;
+  --shiki-token-constant: #4dabf7;
+  --shiki-token-string: #69db7c;
+  --shiki-token-comment: #adb5bd;
+  --shiki-token-keyword: #faa2c1;
+  --shiki-token-parameter: #ffa94d;
+  --shiki-token-function: #b197fc;
+  --shiki-token-string-expression: #8ce99a;
+  --shiki-token-punctuation: #ced4da;
+  --shiki-token-link: #74c0fc;
+
   display: flex;
   flex-direction: column;
   width: 100%;
