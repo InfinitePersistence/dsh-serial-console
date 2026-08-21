@@ -1,5 +1,8 @@
 import { useEffect, useRef } from 'react'
+import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AiActivitySnapshot, AiActivityStatus, AiToolActivity } from './ai-activity.js'
+
+const CODE_LABELS = { copyLabel: '复制代码', copiedLabel: '已复制' }
 
 export interface AiActivityPanelProps {
   readonly activity: AiActivitySnapshot
@@ -44,7 +47,11 @@ export function AiActivityPanel({ activity, onClose }: AiActivityPanelProps) {
         {activity.reasoning !== '' && (
           <details className="dsh-serial-ai-reasoning" open={activity.status === 'thinking'}>
             <summary>思考过程{activity.running ? ' · 进行中' : ''}</summary>
-            <div>{activity.reasoning}</div>
+            <MarkdownText
+              text={activity.reasoning}
+              streaming={activity.running}
+              codeLabels={CODE_LABELS}
+            />
           </details>
         )}
 
@@ -58,7 +65,11 @@ export function AiActivityPanel({ activity, onClose }: AiActivityPanelProps) {
         {activity.response !== '' && (
           <section className="dsh-serial-ai-response" aria-label="AI response">
             <h3>回复</h3>
-            <div>{activity.response}</div>
+            <MarkdownText
+              text={activity.response}
+              streaming={activity.running}
+              codeLabels={CODE_LABELS}
+            />
           </section>
         )}
 

@@ -92,6 +92,27 @@ describe('AI activity projection', () => {
     expect(html).toContain('serial_read')
     expect(html).toContain('正在检查。')
   })
+
+  it('renders assistant Markdown instead of exposing its source markers', () => {
+    const activity = deriveAiActivity(snapshot({
+      nodes: [{
+        kind: 'assistant',
+        seq: 1,
+        turn: 1,
+        step: 1,
+        blocks: [{ kind: 'text', text: '## 结果\n\n- **串口正常**' }],
+      }],
+    }))
+
+    const html = renderToStaticMarkup(createElement(AiActivityPanel, {
+      activity,
+      onClose: () => undefined,
+    }))
+
+    expect(html).toContain('<h2')
+    expect(html).toContain('<strong>串口正常</strong>')
+    expect(html).not.toContain('## 结果')
+  })
 })
 
 function snapshot(overrides: Partial<SerialConversationSnapshot>): SerialConversationSnapshot {

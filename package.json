@@ -1,6 +1,6 @@
 {
   "name": "@infinitepersistence/dsh-serial-console",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "description": "Auditable serial console for DeepSeek Harness with shared user and AI access",
   "license": "MIT",
   "type": "module",
@@ -60,7 +60,8 @@
       "inject": [
         "@deepseek-ai/dsh-api-gateway",
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ],
       "platform": "web"
     }
@@ -110,6 +111,7 @@
     "@deepseek-ai/dsh-system-prompt": ">=0.0.1-rc.1 <0.1.0",
     "@deepseek-ai/dsh-tools": ">=0.0.1-rc.1 <0.1.0",
     "@deepseek-ai/dsh-typert-protocol": ">=0.1.0-rc.6 <0.2.0",
+    "@deepseek-ai/dsh-client-ui-primitives": ">=0.1.0-rc.7 <0.2.0",
     "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
@@ -117,12 +119,14 @@
     "@deepseek-ai/dsh-system-prompt": { "optional": true },
     "@deepseek-ai/dsh-tools": { "optional": true },
     "@deepseek-ai/dsh-typert-protocol": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-primitives": { "optional": true },
     "react": { "optional": true }
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.8",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "serialport": "^13.0.0",

@@ -40,7 +40,7 @@ Host 是唯一物理串口所有者。模型工具调用同进程 service；Web 
 
 `SerialConsoleStore` 依赖 `SerialConsoleRemote` 接口，不依赖 Harness Context。DSH Client 插件只负责把生成的 `ctx.remote.serialConsole` 适配成这个接口并注册 UI slot。Store 保留连接选择、增量事件窗口和单一写 FIFO，不解析 readline 或维护浏览器草稿。
 
-DSH 适配层同时使用 `conversation.view` 的公开 session standard kit，把当前会话的流式 assistant、运行中工具、最终回复和错误折叠成只读 AI 活动快照。该浏览窗不复制会话输入、审批或完整 Chat renderer，也不增加 Host/Remote 接口；独立 React 控制台未提供 `useConversation` 时仍只渲染串口。面板宽度和开关只保存为浏览器本地偏好，不持久化任何会话正文。
+DSH 适配层同时使用 `conversation.view` 的公开 session standard kit，把当前会话的流式 assistant、运行中工具、最终回复和错误折叠成只读 AI 活动快照。正文和思考复用 `@deepseek-ai/dsh-client-ui-primitives` 的流式 `MarkdownText`，保持与原生 Chat 一致的非可信 Markdown 安全边界和代码块体验。该浏览窗不复制会话输入、审批或完整 Chat renderer，也不增加 Host/Remote 接口；独立 React 控制台未提供 `useConversation` 时仍只渲染串口。面板宽度和开关只保存为浏览器本地偏好，不持久化任何会话正文。
 
 `XtermSerialTerminal` 是 Text 模式唯一的屏幕与输入面。RX 的 Base64 原始字节作为 `Uint8Array` 写入 xterm；TX 不写入屏幕，避免板端回显与浏览器本地回显重复。Tab、Backspace、方向键、粘贴、IME 和控制序列按 xterm 产生的字节发送，补全和光标位置由板端 readline 与 VT 回显决定。
 

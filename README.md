@@ -37,7 +37,7 @@ Text 模式提供真实的 VT 终端交互。板卡返回的提示符、ANSI 颜
 
 这些标记只属于界面展示，不会写入串口数据或改变板卡收到的命令。
 
-串口页内置可折叠的 AI 浏览窗。桌面端默认显示在右侧，可拖动分隔线调整宽度；窄屏下自动改为覆盖式抽屉。浏览窗只读呈现当前 DSH 会话的实时思考、工具状态、最终回复和错误，底部仍使用 DSH 原生输入栏。折叠浏览窗不会卸载 xterm，终端内容、光标和滚动位置保持不变；开关和宽度仅保存在本机浏览器中。
+串口页内置可折叠的 AI 浏览窗。桌面端默认显示在右侧，可拖动分隔线调整宽度；窄屏下自动改为覆盖式抽屉。浏览窗只读呈现当前 DSH 会话的实时思考、工具状态、最终回复和错误，并使用 DSH 原生 Markdown 渲染标题、列表、链接、代码块和公式；底部仍使用 DSH 原生输入栏。折叠浏览窗不会卸载 xterm，终端内容、光标和滚动位置保持不变；开关和宽度仅保存在本机浏览器中。
 
 ## 用户与模型协作
 
@@ -93,7 +93,7 @@ Text 模式提供真实的 VT 终端交互。板卡返回的提示符、ANSI 颜
 项目发布在 [`@infinitepersistence/dsh-serial-console`](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)。已经安装 DSH `0.1.0-rc.7` 的用户，可以用一条命令将插件安装到 `web` profile，并同时启用 Host、网页串口页和模型工具：
 
 ```powershell
-dsh.cmd plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.2' --save-exact
+dsh.cmd plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.3' --save-exact
 ```
 
 停止仍在运行的旧 Host 后，启动同一个 profile：
@@ -128,7 +128,7 @@ $dsh = Join-Path $npmGlobal 'dsh.cmd'
 $env:Path = "$npmGlobal;$env:Path"
 
 # 安装并启用串口插件
-& $dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.2' --save-exact
+& $dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.3' --save-exact
 
 # 启动 DSH Web
 & $dsh --profile web
@@ -141,7 +141,7 @@ $env:Path = "$npmGlobal;$env:Path"
 确认 Node.js 与 DSH 版本满足上面的要求后执行：
 
 ```bash
-dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.2' --save-exact
+dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.3' --save-exact
 dsh --profile web
 ```
 
@@ -150,7 +150,7 @@ dsh --profile web
 如果只是把控制台作为 React/Node.js 库嵌入自己的程序，可以使用：
 
 ```bash
-pnpm add '@infinitepersistence/dsh-serial-console@0.1.0-rc.2' --save-exact
+pnpm add '@infinitepersistence/dsh-serial-console@0.1.0-rc.3' --save-exact
 ```
 
 包提供以下公开入口：
@@ -176,7 +176,7 @@ pnpm build
 
 ## 当前状态
 
-项目目前处于 `0.1.0-rc.2` 候选阶段。该候选版将串口页内的可折叠 AI 浏览窗纳入首版范围；完成真机与 DSH Web 验证后，稳定版发布前只接受缺陷修复、兼容性改进和文档完善。
+项目目前处于 `0.1.0-rc.3` 候选阶段。该候选版为串口页内的可折叠 AI 浏览窗补齐 DSH 原生 Markdown 渲染；完成真机与 DSH Web 验证后，稳定版发布前只接受缺陷修复、兼容性改进和文档完善。
 
 当前限制：
 
