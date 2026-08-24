@@ -1,6 +1,6 @@
 # Third-party notices
 
-This project depends on `@xterm/xterm`, `@xterm/addon-fit`, and `@xterm/addon-serialize`, adapts the structural rules from xterm's distributed stylesheet, and distributes serialport's official multi-platform prebuilt runtime inside the npm package.
+This project depends on `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-search`, and `@xterm/addon-serialize`, adapts the structural rules from xterm's distributed stylesheet, and distributes serialport's official multi-platform prebuilt runtime inside the npm package.
 
 ## @xterm/xterm
 
@@ -26,7 +26,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## @xterm/addon-fit and @xterm/addon-serialize
+## @xterm/addon-fit, @xterm/addon-search, and @xterm/addon-serialize
 
 Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)
 

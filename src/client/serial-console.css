@@ -378,6 +378,71 @@
   font: 13px/normal ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 
+.dsh-serial-find {
+  position: absolute;
+  z-index: 20;
+  top: 10px;
+  right: 18px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  width: min(360px, calc(100% - 58px));
+  padding: 5px;
+  color: #d7e0ea;
+  background: #141b23;
+  border: 1px solid #3a4857;
+  border-radius: 7px;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 42%);
+  font: 12px/1.2 system-ui, sans-serif;
+}
+
+.dsh-serial-find input {
+  min-width: 72px;
+  flex: 1 1 auto;
+  padding: 4px 6px;
+  color: #f4f7fb;
+  background: #090e13;
+  border: 1px solid #445466;
+  border-radius: 4px;
+  outline: none;
+  font: 12px/1.2 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.dsh-serial-find input:focus { border-color: #70b8ff; }
+
+.dsh-serial-find-count {
+  flex: 0 0 38px;
+  color: #93a4b7;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.dsh-serial-find button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  color: #d7e0ea;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font: 15px/1 system-ui, sans-serif;
+}
+
+.dsh-serial-find button:hover:not(:disabled) {
+  background: #24303d;
+  border-color: #445466;
+}
+
+.dsh-serial-find button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
 .dsh-serial-terminal-hint {
   position: absolute;
   z-index: 4;

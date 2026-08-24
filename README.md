@@ -17,12 +17,15 @@ DSH Serial Console 是一个面向 DeepSeek Harness 的社区串口控制台项�
 - 让 DeepSeek 模型与用户操作同一个串口，而不是分别占用设备。
 - 让模型发现端口、建立连接、发送命令、读取输出、等待特定内容和添加审计标记。
 - 在串口页右侧直接查看模型思考、工具进度和最终回复，无需来回切换会话标签。
+- 在 Text 终端中使用 `Ctrl+F` 查找历史输出，并在匹配项之间前后跳转。
 - 在 Text 与 HEX 视图之间切换，兼顾命令行操作和原始字节排查。
 - 导出会话事件，并保留独立的串口审计记录。
 
 ## 终端体验
 
 Text 模式提供真实的 VT 终端交互。板卡返回的提示符、ANSI 颜色、光标移动和同行刷新会直接呈现在当前终端画面中。
+
+点击工具栏中的 `Find` 或在终端聚焦时按 `Ctrl+F` 可以查找当前 xterm 缓冲区。输入时会高亮匹配项；`Enter` 跳到下一个，`Shift+Enter` 跳到上一个，`Esc` 关闭查找。打开查找会暂停 Follow，避免实时输出把当前结果拉出视口。
 
 在对话页与串口页之间切换时，控制台会从内存中的 xterm 检查点恢复终端画面、光标和来源标记，只增量处理离开后收到的事件；检查点不连续或事件窗口已截断时会自动回退到完整重建。
 
@@ -93,7 +96,7 @@ Text 模式提供真实的 VT 终端交互。板卡返回的提示符、ANSI 颜
 项目发布在 [`@infinitepersistence/dsh-serial-console`](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)。已经安装 DSH `0.1.0-rc.7` 的用户，可以用一条命令将插件安装到 `web` profile，并同时启用 Host、网页串口页和模型工具：
 
 ```powershell
-dsh.cmd plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.3' --save-exact
+dsh.cmd plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.4' --save-exact
 ```
 
 停止仍在运行的旧 Host 后，启动同一个 profile：
@@ -128,7 +131,7 @@ $dsh = Join-Path $npmGlobal 'dsh.cmd'
 $env:Path = "$npmGlobal;$env:Path"
 
 # 安装并启用串口插件
-& $dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.3' --save-exact
+& $dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.4' --save-exact
 
 # 启动 DSH Web
 & $dsh --profile web
@@ -141,7 +144,7 @@ $env:Path = "$npmGlobal;$env:Path"
 确认 Node.js 与 DSH 版本满足上面的要求后执行：
 
 ```bash
-dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.3' --save-exact
+dsh plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.4' --save-exact
 dsh --profile web
 ```
 
@@ -150,7 +153,7 @@ dsh --profile web
 如果只是把控制台作为 React/Node.js 库嵌入自己的程序，可以使用：
 
 ```bash
-pnpm add '@infinitepersistence/dsh-serial-console@0.1.0-rc.3' --save-exact
+pnpm add '@infinitepersistence/dsh-serial-console@0.1.0-rc.4' --save-exact
 ```
 
 包提供以下公开入口：
@@ -176,7 +179,7 @@ pnpm build
 
 ## 当前状态
 
-项目目前处于 `0.1.0-rc.3` 候选阶段。该候选版为串口页内的可折叠 AI 浏览窗补齐 DSH 原生 Markdown 渲染；完成真机与 DSH Web 验证后，稳定版发布前只接受缺陷修复、兼容性改进和文档完善。
+项目目前处于 `0.1.0-rc.4` 候选阶段。该候选版为 Text 终端增加历史内容查找、高亮和前后导航；完成真机与 DSH Web 验证后，稳定版发布前只接受缺陷修复、兼容性改进和文档完善。
 
 当前限制：
 

@@ -60,6 +60,7 @@ function SerialConsoleSurface({
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
   const [mode, setMode] = useState<'text' | 'hex'>('text')
   const [follow, setFollow] = useState(true)
+  const [findOpen, setFindOpen] = useState(false)
   const [hiddenBeforeSeq, setHiddenBeforeSeq] = useState(uiMemory.hiddenBeforeSeq)
   const [aiPanel, setAiPanel] = useState(loadAiPanelPreferences)
   const [aiUnread, setAiUnread] = useState(false)
@@ -108,6 +109,14 @@ function SerialConsoleSurface({
     const parsedBaud = Number(state.baudRate)
     if (state.selectedPath === '' || !Number.isSafeInteger(parsedBaud) || parsedBaud < 1) return
     await store.connect({ path: state.selectedPath, baudRate: parsedBaud })
+  }
+
+  const setTerminalFindOpen = (open: boolean) => {
+    if (open) {
+      setMode('text')
+      setFollow(false)
+    }
+    setFindOpen(open)
   }
 
   const setAiPanelOpen = (open: boolean) => {
@@ -185,6 +194,8 @@ function SerialConsoleSurface({
       checkpointBaseSeq={hiddenBeforeSeq}
       checkpointAllowed={!state.gapDetected}
       checkpointCache={uiMemory.checkpointCache}
+      findOpen={findOpen}
+      onFindOpenChange={setTerminalFindOpen}
       emptyLabel={synchronizationStopped
         ? 'Serial synchronization stopped. Disconnect or reload the Remote plugin to recover.'
         : connected
@@ -245,15 +256,39 @@ function SerialConsoleSurface({
           <option value="lf">LF</option>
           <option value="none">None</option>
         </select>
-        <button type="button" onClick={() => { setFollow(value => !value) }} aria-pressed={follow}>
+        <button
+          type="button"
+          onClick={() => {
+            const next = !follow
+            if (next) setFindOpen(false)
+            setFollow(next)
+          }}
+          aria-pressed={follow}
+        >
           Follow {follow ? '✓' : '–'}
-        </button>
-        <button type="button" onClick={() => { setMode(value => value === 'text' ? 'hex' : 'text') }}>
-          {mode.toUpperCase()}
         </button>
         <button
           type="button"
           onClick={() => {
+            const next = mode === 'text' ? 'hex' : 'text'
+            if (next === 'hex') setFindOpen(false)
+            setMode(next)
+          }}
+        >
+          {mode.toUpperCase()}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setTerminalFindOpen(!findOpen) }}
+          aria-pressed={findOpen}
+          title="Find in terminal (Ctrl+F)"
+        >
+          Find {findOpen ? '✓' : '–'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setFindOpen(false)
             const next = state.events.at(-1)?.seq ?? hiddenBeforeSeq
             uiMemory.hiddenBeforeSeq = next
             uiMemory.checkpointCache.current = undefined

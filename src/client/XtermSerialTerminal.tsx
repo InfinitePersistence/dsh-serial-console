@@ -1,8 +1,11 @@
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
+import type { ISearchOptions, ISearchResultChangeEvent } from '@xterm/addon-search'
 import { SerializeAddon } from '@xterm/addon-serialize'
 import { Terminal } from '@xterm/xterm'
 import type { IMarker, ITheme } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { SerialActor, SerialEvent } from '../protocol.js'
 import type { SerialLineEnding } from './serial-console-store.js'
 import {
@@ -66,6 +69,7 @@ export interface XtermTerminalCheckpointPayload {
 
 interface TerminalRuntime {
   readonly terminal: Terminal
+  readonly searchAddon: SearchAddon
   readonly serializeAddon: SerializeAddon
   readonly checkpointCache: TerminalCheckpointCache<XtermTerminalCheckpointPayload>
   readonly checkpointKey: string
@@ -102,6 +106,8 @@ export interface XtermSerialTerminalProps {
   readonly checkpointBaseSeq: number
   readonly checkpointAllowed: boolean
   readonly checkpointCache: TerminalCheckpointCache<XtermTerminalCheckpointPayload>
+  readonly findOpen: boolean
+  readonly onFindOpenChange: (open: boolean) => void
   readonly onTextInput: (text: string) => Promise<void>
   readonly onBinaryInput: (dataBase64: string) => Promise<void>
 }
@@ -120,16 +126,20 @@ export function XtermSerialTerminal({
   checkpointBaseSeq,
   checkpointAllowed,
   checkpointCache,
+  findOpen,
+  onFindOpenChange,
   onTextInput,
   onBinaryInput,
 }: XtermSerialTerminalProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const runtimeRef = useRef<TerminalRuntime>()
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const connectedRef = useRef(connected)
   const followRef = useRef(follow)
   const lineEndingRef = useRef(lineEnding)
   const textInputRef = useRef(onTextInput)
   const binaryInputRef = useRef(onBinaryInput)
+  const findOpenChangeRef = useRef(onFindOpenChange)
   const eventsRef = useRef(events)
   const replayThroughSeqRef = useRef(events.at(-1)?.seq ?? checkpointBaseSeq)
   const checkpointCandidateRef = useRef<TerminalCheckpoint<XtermTerminalCheckpointPayload> | null>()
@@ -146,12 +156,15 @@ export function XtermSerialTerminal({
     checkpointCandidate !== null || replayThroughSeqRef.current > checkpointBaseSeq,
   )
   const [gutterRows, setGutterRows] = useState<readonly GutterRow[]>([])
+  const [searchTerm, setSearchTerm] = useState('')
+  const [searchResults, setSearchResults] = useState<ISearchResultChangeEvent>(EMPTY_SEARCH_RESULTS)
 
   connectedRef.current = connected
   followRef.current = follow
   lineEndingRef.current = lineEnding
   textInputRef.current = onTextInput
   binaryInputRef.current = onBinaryInput
+  findOpenChangeRef.current = onFindOpenChange
   eventsRef.current = events
 
   useEffect(() => {
@@ -160,7 +173,9 @@ export function XtermSerialTerminal({
     const styles = getComputedStyle(host)
     const checkpoint = checkpointCandidateRef.current ?? null
     const terminal = new Terminal({
-      allowProposedApi: false,
+      // SearchAddon decorations and result tracking use xterm's proposed
+      // decoration API. The lockfile pins compatible addon and xterm versions.
+      allowProposedApi: true,
       convertEol: false,
       cursorBlink: connectedRef.current,
       disableStdin: true,
@@ -172,11 +187,14 @@ export function XtermSerialTerminal({
       ...(checkpoint === null ? {} : { cols: checkpoint.cols, rows: checkpoint.rows }),
     })
     const fitAddon = new FitAddon()
+    const searchAddon = new SearchAddon({ highlightLimit: 1_000 })
     const serializeAddon = new SerializeAddon()
     terminal.loadAddon(fitAddon)
+    terminal.loadAddon(searchAddon)
     terminal.loadAddon(serializeAddon)
     const runtime: TerminalRuntime = {
       terminal,
+      searchAddon,
       serializeAddon,
       checkpointCache,
       checkpointKey,
@@ -202,6 +220,17 @@ export function XtermSerialTerminal({
       gutterSignature: '',
     }
     runtimeRef.current = runtime
+
+    const searchDisposable = searchAddon.onDidChangeResults(setSearchResults)
+    terminal.attachCustomKeyEventHandler(event => {
+      if (!isTerminalFindShortcut(event)) return true
+      event.preventDefault()
+      event.stopPropagation()
+      searchInputRef.current?.focus()
+      searchInputRef.current?.select()
+      findOpenChangeRef.current(true)
+      return false
+    })
 
     const refresh = () => { refreshGutter(runtime, setGutterRows) }
     const dataDisposable = terminal.onData(data => {
@@ -310,6 +339,7 @@ export function XtermSerialTerminal({
       resizeObserver?.disconnect()
       dataDisposable.dispose()
       binaryDisposable.dispose()
+      searchDisposable.dispose()
       renderDisposable?.dispose()
       scrollDisposable?.dispose()
       resizeDisposable?.dispose()
@@ -318,6 +348,25 @@ export function XtermSerialTerminal({
       if (runtimeRef.current === runtime) runtimeRef.current = undefined
     }
   }, [])
+
+  useEffect(() => {
+    const runtime = runtimeRef.current
+    if (runtime === undefined) return
+    if (!findOpen) {
+      clearTerminalSearch(runtime)
+      setSearchResults(EMPTY_SEARCH_RESULTS)
+      if (connectedRef.current) runtime.terminal.focus()
+      return
+    }
+    if (restoring) return
+
+    if (searchTerm !== '') runTerminalSearch(runtime.searchAddon, searchTerm, 'next', true)
+    const focusFrame = requestAnimationFrame(() => {
+      searchInputRef.current?.focus()
+      searchInputRef.current?.select()
+    })
+    return () => { cancelAnimationFrame(focusFrame) }
+  }, [findOpen, restoring])
 
   useEffect(() => {
     const runtime = runtimeRef.current
@@ -354,6 +403,52 @@ export function XtermSerialTerminal({
     drainEvents(runtime, followRef, setGutterRows)
   }, [events])
 
+  const updateSearchTerm = (term: string) => {
+    setSearchTerm(term)
+    const runtime = runtimeRef.current
+    if (runtime === undefined || restoring) return
+    if (term === '') {
+      clearTerminalSearch(runtime)
+      setSearchResults(EMPTY_SEARCH_RESULTS)
+      return
+    }
+    runTerminalSearch(runtime.searchAddon, term, 'next', true)
+  }
+
+  const navigateSearch = (direction: 'next' | 'previous') => {
+    const runtime = runtimeRef.current
+    if (runtime === undefined || restoring || searchTerm === '') return
+    runTerminalSearch(runtime.searchAddon, searchTerm, direction, false)
+  }
+
+  const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (isTerminalFindShortcut(event)) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.select()
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      onFindOpenChange(false)
+      return
+    }
+    if (event.key === 'Enter' || event.key === 'F3') {
+      event.preventDefault()
+      event.stopPropagation()
+      navigateSearch(event.shiftKey ? 'previous' : 'next')
+    }
+  }
+
+  const searchResultLabel = searchTerm === ''
+    ? ''
+    : searchResults.resultCount === 0
+      ? '0/0'
+      : searchResults.resultIndex < 0
+        ? `–/${searchResults.resultCount}`
+        : `${searchResults.resultIndex + 1}/${searchResults.resultCount}`
+
   return (
     <div
       className={`dsh-serial-terminal-stage${restoring ? ' is-restoring' : ''}`}
@@ -374,10 +469,99 @@ export function XtermSerialTerminal({
         ))}
       </div>
       <div ref={hostRef} className="dsh-serial-xterm-host" />
+      {findOpen && !restoring && (
+        <div className="dsh-serial-find" role="search" aria-label="Find in terminal">
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={searchTerm}
+            placeholder="Find"
+            aria-label="Find text in terminal"
+            autoComplete="off"
+            spellCheck={false}
+            onChange={event => { updateSearchTerm(event.target.value) }}
+            onKeyDown={handleSearchKeyDown}
+          />
+          <output className="dsh-serial-find-count" aria-live="polite">{searchResultLabel}</output>
+          <button
+            type="button"
+            aria-label="Previous match"
+            title="Previous match (Shift+Enter)"
+            disabled={searchTerm === ''}
+            onClick={() => { navigateSearch('previous') }}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            aria-label="Next match"
+            title="Next match (Enter)"
+            disabled={searchTerm === ''}
+            onClick={() => { navigateSearch('next') }}
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            aria-label="Close find"
+            title="Close (Escape)"
+            onClick={() => { onFindOpenChange(false) }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {restoring && <div className="dsh-serial-terminal-restoring">Restoring terminal…</div>}
       {!restoring && events.length === 0 && <div className="dsh-serial-terminal-hint">{emptyLabel}</div>}
     </div>
   )
+}
+
+const EMPTY_SEARCH_RESULTS: ISearchResultChangeEvent = {
+  resultIndex: -1,
+  resultCount: 0,
+}
+
+const TERMINAL_SEARCH_DECORATIONS = {
+  matchBackground: '#332b18',
+  matchBorder: '#8a6d21',
+  matchOverviewRuler: '#c99a2e',
+  activeMatchBackground: '#5c4718',
+  activeMatchBorder: '#ffd166',
+  activeMatchColorOverviewRuler: '#ffd166',
+} satisfies NonNullable<ISearchOptions['decorations']>
+
+export function runTerminalSearch(
+  searchAddon: Pick<SearchAddon, 'findNext' | 'findPrevious'>,
+  term: string,
+  direction: 'next' | 'previous',
+  incremental: boolean,
+): void {
+  const options: ISearchOptions = {
+    caseSensitive: false,
+    decorations: TERMINAL_SEARCH_DECORATIONS,
+    ...(direction === 'next' ? { incremental } : {}),
+  }
+  if (direction === 'previous') searchAddon.findPrevious(term, options)
+  else searchAddon.findNext(term, options)
+}
+
+function clearTerminalSearch(runtime: TerminalRuntime): void {
+  runtime.searchAddon.clearDecorations()
+  // A serialized checkpoint is written before terminal.open(). xterm's
+  // selection service does not exist until then.
+  if (runtime.terminal.element !== undefined) runtime.terminal.clearSelection()
+}
+
+export function isTerminalFindShortcut(event: {
+  readonly key: string
+  readonly ctrlKey: boolean
+  readonly metaKey: boolean
+  readonly altKey: boolean
+}): boolean {
+  return !event.altKey
+    && (event.ctrlKey || event.metaKey)
+    && event.key.toLowerCase() === 'f'
 }
 
 function drainEvents(
