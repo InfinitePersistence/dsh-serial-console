@@ -2,7 +2,10 @@ import { useEffect, useRef } from 'react'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AiActivitySnapshot, AiActivityStatus, AiToolActivity } from './ai-activity.js'
 
-const CODE_LABELS = { copyLabel: '复制代码', copiedLabel: '已复制' }
+const MARKDOWN_LABELS = {
+  code: { copyLabel: '复制代码', copiedLabel: '已复制' },
+  footnotes: '脚注',
+}
 
 export interface AiActivityPanelProps {
   readonly activity: AiActivitySnapshot
@@ -50,7 +53,7 @@ export function AiActivityPanel({ activity, onClose }: AiActivityPanelProps) {
             <MarkdownText
               text={activity.reasoning}
               streaming={activity.running}
-              codeLabels={CODE_LABELS}
+              labels={MARKDOWN_LABELS}
             />
           </details>
         )}
@@ -68,7 +71,7 @@ export function AiActivityPanel({ activity, onClose }: AiActivityPanelProps) {
             <MarkdownText
               text={activity.response}
               streaming={activity.running}
-              codeLabels={CODE_LABELS}
+              labels={MARKDOWN_LABELS}
             />
           </section>
         )}

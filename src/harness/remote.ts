@@ -97,9 +97,9 @@ const marker = z.object({
 function codec(typeSymbol: string, schema: z.ZodType): {
   readonly mode: 'strict'
   readonly typeSymbol: string
-  readonly schema: z.ZodType
+  readonly create: () => z.ZodType
 } {
-  return { mode: 'strict', typeSymbol, schema }
+  return { mode: 'strict', typeSymbol, create: () => schema }
 }
 
 function descriptor(

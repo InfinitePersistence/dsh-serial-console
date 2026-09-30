@@ -100,7 +100,7 @@ describe('AI activity projection', () => {
         seq: 1,
         turn: 1,
         step: 1,
-        blocks: [{ kind: 'text', text: '## 结果\n\n- **串口正常**' }],
+        blocks: [{ kind: 'text', text: '## 结果\n\n- **串口正常**\n\n```sh\nls /dev\n```\n\n注释[^1]\n\n[^1]: 串口检查' }],
       }],
     }))
 
@@ -112,6 +112,9 @@ describe('AI activity projection', () => {
     expect(html).toContain('<h2')
     expect(html).toContain('<strong>串口正常</strong>')
     expect(html).not.toContain('## 结果')
+    expect(html).toContain('ls /dev')
+    expect(html).toContain('复制代码')
+    expect(html).toContain('脚注')
   })
 })
 

@@ -46,12 +46,13 @@ describe('DSH installable bundle', () => {
   it('rejects invalid snapshot cursors, limits, and wait durations at the Remote boundary', () => {
     const snapshotDescriptor = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'snapshot')
     const waitDescriptor = TYPERT_REMOTE.descriptors.find(descriptor => descriptor.method === 'waitSnapshot')
-    const snapshotSchema = snapshotDescriptor?.parameters[0]?.codec.schema as {
-      parse(value: unknown): unknown
+    const snapshotCodec = snapshotDescriptor?.parameters[0]?.codec
+    const waitCodec = waitDescriptor?.parameters[0]?.codec
+    if (snapshotCodec?.mode !== 'strict' || waitCodec?.mode !== 'strict') {
+      throw new Error('Serial request codecs must be strict')
     }
-    const waitSchema = waitDescriptor?.parameters[0]?.codec.schema as {
-      parse(value: unknown): unknown
-    }
+    const snapshotSchema = snapshotCodec.create()
+    const waitSchema = waitCodec.create()
 
     expect(() => { snapshotSchema.parse({ afterSeq: -1, limit: 1 }) }).toThrow()
     expect(() => { snapshotSchema.parse({ afterSeq: 0.5, limit: 1 }) }).toThrow()

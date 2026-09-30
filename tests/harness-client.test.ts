@@ -1,9 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { ReactElement } from 'react'
+import { createElement } from 'react'
+import type { ComponentProps, ReactElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { apply } from '../src/harness/client.js'
+import { apply, SerialConversationView } from '../src/harness/client.js'
 import type { SerialConsoleStore } from '../src/client/serial-console-store.js'
-import type { SerialConversationSnapshot, UseSerialConversation } from '../src/client/ai-activity.js'
+import type { ChatSnapshot } from '@deepseek-ai/dsh-client-ui-chat/client'
+import type { SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {
   SerialConsoleRemote,
   SerialSnapshot,
@@ -23,6 +26,18 @@ type SnapshotInvocation = (
 ) => Promise<RemoteResult<SerialSnapshot>>
 
 describe('Harness client adapter', () => {
+  it('combines Session lifecycle with Chat content instead of reading nodes from Session', async () => {
+    const store = await mountedStore(async () => ({ ok: true, value: immediateSnapshot() }))
+    const html = renderToStaticMarkup(createElement(SerialConversationView, {
+      store,
+      ...viewHooks(true),
+    }))
+    expect(html).toContain('新版流式回复')
+    expect(html).toContain('新版思考过程')
+    expect(html).toContain('serial_read')
+    expect(html).toContain('AI 正在调用工具')
+  })
+
   it('turns a direct Typert Promise rejection into a persistent synchronization fault', async () => {
     const store = await mountedStore(async () => {
       throw new Error('client assembly rejected the call')
@@ -63,10 +78,8 @@ describe('Harness client adapter', () => {
 })
 
 async function mountedStore(snapshotInvocation: SnapshotInvocation): Promise<SerialConsoleStore> {
-  let view: ((props: { readonly useSession: UseSerialConversation }) => ReactElement<{
-    store: SerialConsoleStore
-    useConversation: UseSerialConversation
-  }>) | undefined
+  type ViewProps = ComponentProps<typeof SerialConversationView>
+  let view: ((props: Omit<ViewProps, 'store'>) => ReactElement<ViewProps>) | undefined
   const empty = immediateSnapshot()
   const api = {
     listPorts: async () => ({ ok: true, value: [] } as const),
@@ -111,21 +124,35 @@ async function mountedStore(snapshotInvocation: SnapshotInvocation): Promise<Ser
 
   await apply(ctx as unknown as Context)
   if (view === undefined) throw new Error('serial view was not registered')
-  const useSession: UseSerialConversation = selector => selector(emptyConversation())
-  const element = view({ useSession })
-  if (element.props.useConversation !== useSession) {
-    throw new Error('serial view did not receive the DSH conversation selector')
-  }
+  const hooks = viewHooks(false)
+  const element = view(hooks)
+  expect(element.props.useSession).toBe(hooks.useSession)
+  expect(element.props.useChat).toBe(hooks.useChat)
   return element.props.store
 }
 
-function emptyConversation(): SerialConversationSnapshot {
+function viewHooks(running: boolean): Omit<ComponentProps<typeof SerialConversationView>, 'store'> {
+  // Only public fields read by the adapter are supplied. Session deliberately
+  // has no nodes/partial/runningCalls: those belong to Chat in DSH 0.2.
+  const session = { running, lastAgentError: null } as SessionSnapshot
+  const chat = {
+    legacy: {
+      nodes: [],
+      partial: running ? {
+        turn: 1, step: 1,
+        blocks: [
+          { kind: 'reasoning', text: '新版思考过程' },
+          { kind: 'text', text: '新版流式回复' },
+        ],
+      } : null,
+      runningCalls: running ? [{ callId: 'call-1', name: 'serial_read', turn: 1, step: 1 }] : [],
+      turnTimings: new Map(),
+      turnEnds: new Map(),
+    },
+  } as unknown as ChatSnapshot
   return {
-    running: false,
-    partial: null,
-    nodes: [],
-    runningCalls: [],
-    lastAgentError: null,
+    useSession: selector => selector(session),
+    useChat: selector => selector(chat),
   }
 }
 

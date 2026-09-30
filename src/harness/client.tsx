@@ -1,7 +1,13 @@
 /** Combined browser plugin: mount Remote descriptors and register the Serial tab. */
 import type { Context } from '@deepseek-ai/cordis'
+import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
+import type {} from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import { useMemo } from 'react'
 import { SerialConsole } from '../client/SerialConsole.js'
-import type { UseSerialConversation } from '../client/ai-activity.js'
+import { deriveAiActivity } from '../client/ai-activity.js'
 import { SerialConsoleStore } from '../client/serial-console-store.js'
 import { SerialRemoteError } from '../protocol.js'
 import type {
@@ -35,25 +41,6 @@ interface SerialRemoteNamespace {
   mark(request: SerialMarkRequest): Promise<RemoteResult<SerialMarkerEvent>>
 }
 
-interface ClientContext extends Context {
-  get(name: 'remote.serialConsole'): SerialRemoteNamespace
-  get(name: string): unknown
-  remote: {
-    $mount(contribution: typeof serialRemote): Promise<() => Promise<void>>
-  }
-  slots: {
-    inject(name: 'conversation.view', register: () => unknown): unknown
-    register(
-      definition: { readonly name: 'conversation.view'; readonly id: string; readonly order: number; readonly label: string },
-      component: (props: SerialConversationViewProps) => React.JSX.Element,
-    ): unknown
-  }
-}
-
-interface SerialConversationViewProps {
-  readonly useSession: UseSerialConversation
-}
-
 export const inject = ['slots', 'remote']
 
 /**
@@ -66,12 +53,12 @@ export const inject = ['slots', 'remote']
  * declaration. `ctx.get()` is the documented no-inject read path, and after
  * `$mount()` settled the namespace fiber is ACTIVE, so the read is safe.
  */
-export async function apply(baseContext: Context): Promise<void> {
-  const ctx = baseContext as ClientContext
+export async function apply(ctx: Context): Promise<void> {
   const disposeRemote = await ctx.remote.$mount(serialRemote)
   ctx.effect(() => disposeRemote, 'dsh-serial-console: unmount browser Remote')
 
-  const api = ctx.get('remote.serialConsole') as SerialRemoteNamespace
+  const api = ctx.get('remote.serialConsole') as SerialRemoteNamespace | undefined
+  if (api === undefined) throw new Error('Serial Remote namespace was not mounted')
   const remote: SerialConsoleRemote = {
     listPorts: async () => unwrap(await api.listPorts()),
     connect: async request => unwrap(await api.connect(request)),
@@ -99,7 +86,24 @@ export async function apply(baseContext: Context): Promise<void> {
     id: 'serial-console',
     order: 20,
     label: '串口',
-  }, ({ useSession }) => <SerialConsole store={store} useConversation={useSession} />))
+  }, ({ useSession, useChat }) => <SerialConversationView store={store} useSession={useSession} useChat={useChat} />))
+}
+
+/** Session owns lifecycle; Chat owns streaming content and tool projections. */
+export function SerialConversationView({ store, useSession, useChat }: Pick<ConvViewProps, 'useSession' | 'useChat'> & {
+  readonly store: SerialConsoleStore
+}) {
+  const running = useSession(snapshot => snapshot.running)
+  const lastAgentError = useSession(snapshot => snapshot.lastAgentError)
+  const legacy = useChat(snapshot => snapshot.legacy)
+  const activity = useMemo(() => deriveAiActivity({
+    running,
+    lastAgentError,
+    nodes: legacy.nodes,
+    partial: legacy.partial,
+    runningCalls: legacy.runningCalls,
+  }), [running, lastAgentError, legacy])
+  return <SerialConsole store={store} aiActivity={activity} />
 }
 
 function unwrap<T>(result: RemoteResult<T>): T {

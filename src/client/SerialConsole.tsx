@@ -21,6 +21,8 @@ export interface SerialConsoleProps {
   readonly store: SerialConsoleStore
   /** DSH session selector hook; omitted when embedding the standalone React surface. */
   readonly useConversation?: UseSerialConversation
+  /** Pre-projected activity from the current DSH Session and Chat hooks. */
+  readonly aiActivity?: AiActivitySnapshot
 }
 
 interface SerialConsoleUiMemory {
@@ -31,7 +33,8 @@ interface SerialConsoleUiMemory {
 const UI_MEMORY = new WeakMap<SerialConsoleStore, SerialConsoleUiMemory>()
 
 /** Standalone serial console combining xterm with Host connection controls. */
-export function SerialConsole({ store, useConversation }: SerialConsoleProps) {
+export function SerialConsole({ store, useConversation, aiActivity }: SerialConsoleProps) {
+  if (aiActivity !== undefined) return <SerialConsoleSurface store={store} aiActivity={aiActivity} />
   if (useConversation === undefined) return <SerialConsoleSurface store={store} />
   return <ConversationAwareSerialConsole store={store} useConversation={useConversation} />
 }
@@ -39,7 +42,7 @@ export function SerialConsole({ store, useConversation }: SerialConsoleProps) {
 function ConversationAwareSerialConsole({
   store,
   useConversation,
-}: Required<SerialConsoleProps>) {
+}: Required<Pick<SerialConsoleProps, 'store' | 'useConversation'>>) {
   const conversation = useConversation(selectConversation)
   const activity = useMemo(() => deriveAiActivity(conversation), [conversation])
   return <SerialConsoleSurface store={store} aiActivity={activity} />

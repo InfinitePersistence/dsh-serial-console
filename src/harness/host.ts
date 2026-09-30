@@ -35,7 +35,7 @@ export interface Config {
   readonly snapshotLimit?: number
 }
 
-export const Config: schema<Config> = schema.object({
+export const Config = schema.object({
   logDirectory: schema.string().required(),
   ringCapacity: schema.number().step(1).min(100).default(20_000),
   snapshotLimit: schema.number().step(1).min(1).default(2_000),
@@ -46,7 +46,7 @@ const DEFAULT_SNAPSHOT_LIMIT = 2_000
 
 /** One process-wide service owns every serial RX/TX event and audit record. */
 export class SerialConsoleService extends TypertRemoteService {
-  static Config: schema<Config> = Config
+  static Config = Config
 
   readonly manager: SerialSessionManager
 

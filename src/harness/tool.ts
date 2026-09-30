@@ -15,7 +15,7 @@ export interface Config {
   readonly maxReadBytes?: number
 }
 
-export const Config: schema<Config> = schema.object({
+export const Config = schema.object({
   maxReadLines: schema.number().step(1).min(1).default(200),
   maxReadBytes: schema.number().step(1).min(64).default(16_384),
 })
