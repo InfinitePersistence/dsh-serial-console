@@ -4,6 +4,15 @@ import { TYPERT_REMOTE } from '../src/harness/remote.js'
 import { TYPERT } from '../src/harness/typert.js'
 
 describe('DSH installable bundle', () => {
+  it('keeps the lockfile peer-install setting consistent with the workspace', () => {
+    const workspace = readFileSync(new URL('../pnpm-workspace.yaml', import.meta.url), 'utf8')
+    const lockfile = readFileSync(new URL('../pnpm-lock.yaml', import.meta.url), 'utf8')
+    const configured = /^autoInstallPeers: (true|false)\s*$/m.exec(workspace)?.[1]
+    const locked = /^  autoInstallPeers: (true|false)\s*$/m.exec(lockfile)?.[1]
+    expect(configured).toBeDefined()
+    expect(locked).toBe(configured)
+  })
+
   it('declares the profile patch and prebuilt browser client', () => {
     const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       dsh?: { bundle?: { patch?: string }; client?: { platform?: string } }
