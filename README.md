@@ -87,13 +87,13 @@ Text 模式提供真实的 VT 终端交互。板卡返回的提示符、ANSI 颜
 ### 环境要求
 
 - Node.js `^22.19.0` 或 `>=24.0.0`
-- DeepSeek Harness `0.2.0-rc.2`（插件 `0.1.0-rc.5` 的适配目标）
+- DeepSeek Harness `0.2.0-rc.2`（与插件 `0.1.0-rc.5` 配套验证）
 - pnpm `11.22.0`
 - Windows 或 Linux 串口环境
 
 ### 已有 DSH：一行安装并启用
 
-项目发布在 [`@infinitepersistence/dsh-serial-console`](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)。本分支准备发布 `0.1.0-rc.5`；以下安装命令在该版本发布到 npm 后使用。已经安装 DSH `0.2.0-rc.2` 的用户，可以用一条命令将插件安装到 `web` profile，并同时启用 Host、网页串口页和模型工具：
+项目发布在 [`@infinitepersistence/dsh-serial-console`](https://www.npmjs.com/package/@infinitepersistence/dsh-serial-console)。当前候选版为 `0.1.0-rc.5`，对应 DSH `0.2.0-rc.2`。已经安装该版本 DSH 的用户，可以用一条命令将插件安装到 `web` profile，并同时启用 Host、网页串口页和模型工具：
 
 ```powershell
 dsh.cmd plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.5' --save-exact
@@ -108,6 +108,18 @@ dsh.cmd --profile web
 `dsh.cmd web` 与 `dsh.cmd --profile web` 等价。安装和启动必须使用同一个 profile；升级后请重启 Host，并在浏览器中使用 `Ctrl+F5` 刷新页面。
 
 从旧 DSH 升级时，先完全退出 Host，再执行 `npm.cmd install --global '@deepseek-ai/dsh@0.2.0-rc.2'`，之后安装插件。仍使用 DSH `0.1.0-rc.7` 的用户请保留插件 `0.1.0-rc.4`，不要混装 `rc.5`，也不要使用 `allow-version` 绕过兼容性检查。后续 DSH 版本需要重新验证，不能仅凭版本号较新认定兼容。
+
+### 已安装插件：更新到本候选版
+
+确认 DSH 已为 `0.2.0-rc.2`，停止旧 Host 后执行：
+
+```powershell
+dsh.cmd plugin --profile web add '@infinitepersistence/dsh-serial-console@0.1.0-rc.5' --save-exact
+if ($LASTEXITCODE -ne 0) { throw '插件更新失败，请不要继续启动' }
+dsh.cmd --profile web
+```
+
+安装失败时不要继续启动。网页打开后用 `Ctrl+F5` 刷新。候选版发布到 npm 的 `next` 通道；对外安装指令固定具体版本，不依赖 `latest`，也不使用本地源码目录链接。
 
 ### 全新 Windows：安装环境、DSH 与插件
 
@@ -181,13 +193,15 @@ pnpm test:compat
 
 `test:compat` 会先构建，再使用官方 Cordis/Typert/工具运行时验证 Host 挂载、工具注册和卸载清理，不打开物理串口。测试依赖中包含官方 Markdown 组件在独立测试环境所需的库；它们不随插件发布，DSH Web 中仍复用宿主组件。发布前还需用 `npm pack` 产物在独立 Web profile 完成界面与真实串口验收；构建成功不等于真机验证通过。
 
-若安装时报 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`，说明锁定的依赖尚未满足 pnpm 的最短发布时间要求，请按错误中给出的时间等待后重试，不必删除 lockfile 或关闭供应链检查。DSH `0.2.0-rc.2` 相关依赖于 2026-09-29 发布，默认 24 小时等待期在北京时间 2026-09-30 晚间陆续结束。
+若安装时报 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`，说明插件或依赖尚未满足 pnpm 的最短发布时间要求，请按错误中给出的时间等待后重试，不必删除 lockfile 或关闭供应链检查。新发布的插件版本也可能需要等待，发布成功不代表能立即通过这一检查。
 
 本项目是 DeepSeek Harness 的可安装组合插件，同时也提供可复用的协议、Node.js 串口核心和 React 控制台；它不是一个双击即可运行的独立桌面应用。
 
 ## 当前状态
 
-当前源码准备 `0.1.0-rc.5` 候选版，适配 DSH `0.2.0-rc.2` 的 Typert 校验器工厂、Session/Chat 拆分和 Markdown 标签接口，保留已有终端查找、检查点和 AI 侧窗功能。本次不改串口收发算法；完成真机与 DSH Web 验证后再发布 npm，不自动移动 `latest` 标签。
+当前版本为 `0.1.0-rc.5`，仍属候选版，尚不是 `0.1.0` 稳定版。适配 DSH `0.2.0-rc.2` 的 Typert 校验器工厂、Session/Chat 拆分和 Markdown 标签接口，保留已有终端查找、检查点和 AI 侧窗功能，不改串口收发算法。
+
+本候选版已通过维护者 Windows 环境的依赖安装、类型检查、71 项测试、构建、Host/7 个工具兼容性检查和实际使用验收。修复了 `autoInstallPeers` 与锁文件不一致的问题，明确声明开发测试依赖，保持冻结安装可复现。该验证不代表已覆盖所有板卡、操作系统或后续 DSH 版本。
 
 当前限制：
 
